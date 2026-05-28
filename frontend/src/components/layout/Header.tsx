@@ -1,26 +1,68 @@
 "use client";
 
-import { User, Bell, MapPin } from "lucide-react";
+import { useState, useEffect } from "react";
+import { User, Bell } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
-import { LiveIndicator } from "@/components/dashboard/LiveIndicator";
 
 interface HeaderProps {
-  title?: string;
   userName?: string;
   showLiveIndicator?: boolean;
 }
 
-export function Header({ title = "Dashboard", userName = "Harsh Pardhi", showLiveIndicator = false }: HeaderProps) {
+export function Header({ userName = "Harsh Pardhi", showLiveIndicator = true }: HeaderProps) {
+  const [activeTime, setActiveTime] = useState("00h 00m");
+
+  // Calculate active time from session start
+  useEffect(() => {
+    const sessionStart = localStorage.getItem('sessionStartTime') || Date.now().toString();
+    const updateTime = () => {
+      const now = Date.now();
+      const diff = now - parseInt(sessionStart);
+      const hours = Math.floor(diff / (1000 * 60 * 60));
+      const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+      setActiveTime(`${String(hours).padStart(2, '0')}h ${String(minutes).padStart(2, '0')}m`);
+    };
+
+    updateTime();
+    const interval = setInterval(updateTime, 60000); // Update every minute
+    
+    return () => clearInterval(interval);
+  }, []);
+
   return (
     <header className="h-14 border-b border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center justify-between px-4 lg:px-6">
-      {/* Left side - Live indicator and Region */}
+      {/* Left side - Portal status and Region */}
       <div className="flex items-center gap-4">
-        {showLiveIndicator && <LiveIndicator />}
+        {showLiveIndicator && (
+          <div className="flex items-center gap-2">
+            {/* Small Neon Green Circle - Subtle Glow */}
+            <div className="relative flex items-center">
+              <div
+                className="w-2 h-2 rounded-full bg-emerald-500"
+                style={{
+                  boxShadow: "0 0 6px 1px rgba(34, 197, 94, 0.6), 0 0 10px 2px rgba(34, 197, 94, 0.3)",
+                }}
+              />
+            </div>
+            
+            {/* Portal Status */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                Portal Live = Active
+              </span>
+              <span className="text-xs text-gray-400 dark:text-slate-500">|</span>
+              <span className="text-xs text-gray-500 dark:text-slate-400">
+                Active Time - {activeTime}
+              </span>
+            </div>
+          </div>
+        )}
+        
+        {/* Region */}
         <div className="flex items-center gap-2">
-          <MapPin className="h-4 w-4 text-gray-500 dark:text-slate-400" />
           <span className="text-sm font-medium text-gray-700 dark:text-slate-300">
-            Region: Central India 🇮🇳
+            🇮🇳 Region: Central India
           </span>
         </div>
       </div>

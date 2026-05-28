@@ -57,27 +57,32 @@ export default function DashboardPage() {
     {
       title: "Provision Resource",
       description: "Create new Azure resources",
-      icon: <Play className="h-4 w-4 text-azure-500" />,
+      icon: <Play className="h-4 w-4 text-blue-500" />,
+      iconBg: "bg-blue-50 dark:bg-blue-900/30",
     },
     {
       title: "Check Compliance",
       description: "Validate policy compliance",
       icon: <Shield className="h-4 w-4 text-emerald-500" />,
+      iconBg: "bg-emerald-50 dark:bg-emerald-900/30",
     },
     {
       title: "Optimize Costs",
       description: "Reduce infrastructure costs",
       icon: <DollarSign className="h-4 w-4 text-amber-500" />,
+      iconBg: "bg-amber-50 dark:bg-amber-900/30",
     },
     {
       title: "Open ITSM Ticket",
       description: "Create support ticket",
       icon: <FileText className="h-4 w-4 text-purple-500" />,
+      iconBg: "bg-purple-50 dark:bg-purple-900/30",
     },
     {
       title: "View Dashboards",
       description: "Monitor resource metrics",
-      icon: <LayoutDashboard className="h-4 w-4 text-pink-500" />,
+      icon: <LayoutDashboard className="h-4 w-4 text-indigo-500" />,
+      iconBg: "bg-indigo-50 dark:bg-indigo-900/30",
     },
   ];
 
@@ -100,7 +105,7 @@ export default function DashboardPage() {
             
             {/* Overview Section with Heading */}
             <div className="mb-4">
-              <h2 className="text-base font-semibold text-gray-900 dark:text-white mb-3">Overview</h2>
+              <h2 className="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-wide mb-3">OVERVIEW</h2>
               
               {/* Metrics Grid */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
@@ -132,10 +137,10 @@ export default function DashboardPage() {
                       </CardTitle>
                     </CardHeader>
                     <CardContent>
-                      {/* Grid layout for quick actions */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {/* Grid layout for quick actions - 2-column */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         {quickActions.map((action, index) => (
-                          <QuickActionCard key={index} {...action} />
+                          <QuickActionCard key={index} {...action} iconBg={action.iconBg} />
                         ))}
                       </div>
                     </CardContent>
