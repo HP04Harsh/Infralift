@@ -1,29 +1,36 @@
 "use client";
 
-import { Search, Settings, User, ChevronRight, Menu, X } from "lucide-react";
+import { Search, Settings, ChevronRight, Menu, X } from "lucide-react";
 import { useState } from "react";
+import { useRouter, usePathname } from "next/navigation";
 import { useOnboardingStore } from "@/store/onboardingStore";
+import { useSettingsStore } from "@/store/settingsStore";
 import { cn } from "@/lib/utils";
 
 const infrastructureAgents = [
-  "Provisioning Agent",
-  "Assessment Agent",
-  "Migration Agent",
-  "Observability Agent",
-  "Optimization Agent",
-  "Troubleshoot Agent",
-  "ITSM Agent",
-  "Policy & Compliance Agent",
+  { name: "Provisioning Agent", path: "/provisioning" },
+  { name: "Assessment Agent", path: "/assessment" },
+  { name: "Migration Agent", path: "/migration" },
+  { name: "Observability Agent", path: "/observability" },
+  { name: "Optimization Agent", path: "/optimization" },
+  { name: "Troubleshoot Agent", path: "/troubleshoot" },
+  { name: "ITSM Agent", path: "/itsm" },
+  { name: "Policy & Compliance Agent", path: "/compliance" },
 ];
 
 export function Sidebar() {
+  const router = useRouter();
+  const pathname = usePathname();
   const [searchQuery, setSearchQuery] = useState("");
   const { setSearchQuery: setGlobalSearchQuery } = useOnboardingStore();
-  const [activeAgent, setActiveAgent] = useState("Provisioning Agent");
+  const { general, customization } = useSettingsStore();
   const [isOpen, setIsOpen] = useState(false);
 
+  // Determine active agent based on current pathname
+  const activeAgent = infrastructureAgents.find(agent => agent.path === pathname)?.name || "Provisioning Agent";
+
   const filteredAgents = infrastructureAgents.filter((agent) =>
-    agent.toLowerCase().includes(searchQuery.toLowerCase())
+    agent.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const handleSearch = (query: string) => {
@@ -57,22 +64,50 @@ export function Sidebar() {
       >
         {/* Logo Section */}
         <div className="p-4 border-b border-gray-800">
-          <div className="flex items-center gap-2.5 mb-2">
-            <div className="w-8 h-8 bg-azure-500 rounded-lg flex items-center justify-center flex-shrink-0">
-              <span className="text-white font-bold text-base">I</span>
+          <button 
+            onClick={() => router.push('/dashboard')}
+            className="flex items-center gap-2.5 mb-2 hover:opacity-80 transition-opacity cursor-pointer w-full text-left"
+          >
+            <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden">
+              {customization.logoUrl ? (
+                <img 
+                  src={customization.logoUrl} 
+                  alt={general.portalName} 
+                  className="w-full h-full object-contain"
+                  onError={(e) => {
+                    e.currentTarget.style.display = 'none';
+                    e.currentTarget.parentElement!.innerHTML = '<span class="text-azure-500 font-bold text-base">I</span>';
+                  }}
+                />
+              ) : (
+                <img 
+                  src="/images/infralift-logo.png" 
+                  alt={general.portalName} 
+                  className="w-full h-full object-contain"
+                  onError={(e) => {
+                    e.currentTarget.style.display = 'none';
+                    e.currentTarget.parentElement!.innerHTML = '<span class="text-azure-500 font-bold text-base">I</span>';
+                  }}
+                />
+              )}
             </div>
-            <h1 className="text-lg font-bold text-white">Infralift</h1>
-          </div>
+            <h1 className="text-lg font-bold text-white">{general.portalName}</h1>
+          </button>
           <p className="text-gray-400 text-[10px] mb-2 leading-tight">
-            Azure Infrastructure Automation Platform
+            {general.organizationName}
           </p>
-          <span className="inline-block px-2 py-0.5 bg-azure-600 text-white text-[10px] rounded-full font-medium">
-            V1.1
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="inline-block px-2 py-0.5 bg-azure-600 text-white text-[10px] rounded-full font-medium">
+              V1.1
+            </span>
+            <span className="inline-block px-2 py-0.5 bg-purple-600 text-white text-[10px] rounded-full font-medium shadow-lg shadow-purple-500/50">
+              Beta
+            </span>
+          </div>
         </div>
 
         {/* Search */}
-        <div className="p-3">
+        <div className="p-3 pb-5">
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500 h-3.5 w-3.5" />
             <input
@@ -93,20 +128,20 @@ export function Sidebar() {
           <nav className="space-y-0.5">
             {filteredAgents.map((agent) => (
               <button
-                key={agent}
-                onClick={() => setActiveAgent(agent)}
+                key={agent.name}
+                onClick={() => router.push(agent.path)}
                 className={cn(
                   "w-full flex items-center justify-between px-2.5 py-2 rounded-md text-xs transition-all group",
-                  activeAgent === agent
+                  activeAgent === agent.name
                     ? "bg-azure-600 text-white"
                     : "text-gray-300 hover:bg-gray-800 hover:text-white"
                 )}
               >
-                <span className="flex-1 text-left truncate">{agent}</span>
+                <span className="flex-1 text-left truncate">{agent.name}</span>
                 <ChevronRight
                   className={cn(
                     "h-3.5 w-3.5 transition-transform opacity-0 group-hover:opacity-100 flex-shrink-0",
-                    activeAgent === agent && "opacity-100"
+                    activeAgent === agent.name && "opacity-100"
                   )}
                 />
               </button>
@@ -115,23 +150,30 @@ export function Sidebar() {
         </div>
 
         {/* Settings */}
-        <div className="px-3 pb-3 border-t border-gray-800">
-          <button className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-xs text-gray-300 hover:bg-gray-800 hover:text-white transition-all">
+        <div className="px-3 pb-2 border-t border-gray-800">
+          <button 
+            onClick={() => router.push('/settings')}
+            className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-xs text-gray-300 hover:bg-gray-800 hover:text-white transition-all"
+          >
             <Settings className="h-3.5 w-3.5 flex-shrink-0" />
             <span>Settings</span>
           </button>
         </div>
 
-        {/* User Profile */}
-        <div className="p-3 border-t border-gray-800 bg-gray-900/50">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 bg-azure-500 rounded-full flex items-center justify-center flex-shrink-0">
-              <User className="h-4 w-4 text-white" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-medium text-white truncate">Harsh Pardhi</p>
-              <p className="text-[10px] text-gray-400 truncate">harsh@infralift.com</p>
-            </div>
+        {/* Divider line */}
+        <div className="px-3 pb-2">
+          <hr className="border-gray-800" />
+        </div>
+
+        {/* Footer */}
+        <div className="px-3 pb-4">
+          <div className="text-center space-y-1">
+            <p className="text-[10px] text-gray-500 font-medium">
+              2026 @ InfraLift LLP
+            </p>
+            <p className="text-[9px] text-gray-600">
+              All rights reserved
+            </p>
           </div>
         </div>
       </aside>

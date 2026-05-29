@@ -75,17 +75,17 @@ export function SetupCard({
               <span className="text-xs font-medium">{stepNumber}</span>
             )}
           </div>
-          <div className="flex-1 min-w-0">
-            <CardTitle className="text-sm font-semibold text-gray-900 dark:text-white">{title}</CardTitle>
-            <CardDescription className="mt-0.5 text-xs text-gray-500 dark:text-slate-400">{description}</CardDescription>
+          <div className="flex-1">
+            <CardTitle className="text-sm font-semibold text-gray-900 dark:text-white whitespace-normal">{title}</CardTitle>
+            <CardDescription className="mt-0.5 text-xs text-gray-500 dark:text-slate-400 whitespace-normal">{description}</CardDescription>
           </div>
         </div>
       </CardHeader>
       <CardContent className="pt-0">
         <div className="space-y-3">
           {/* Command Block */}
-          <div className="relative bg-gray-900 dark:bg-slate-950 rounded-md p-3 overflow-x-auto">
-            <pre className="text-xs text-gray-100 dark:text-slate-200 font-mono whitespace-pre-wrap">
+          <div className="relative bg-gray-900 dark:bg-slate-950 rounded-md p-3 overflow-x-auto min-w-0">
+            <pre className="text-xs text-gray-100 dark:text-slate-200 font-mono whitespace-pre-wrap break-all">
               {command}
             </pre>
             <Button

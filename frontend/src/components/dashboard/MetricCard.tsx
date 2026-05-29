@@ -40,7 +40,7 @@ export function MetricCard({
               </p>
             </div>
             <div className={cn(
-              "p-2 rounded-lg flex-shrink-0 ml-2",
+              "p-2.5 rounded-xl flex-shrink-0 ml-2",
               iconBg
             )}>
               {icon}

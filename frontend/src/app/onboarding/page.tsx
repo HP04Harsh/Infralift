@@ -13,6 +13,7 @@ import { useOnboardingStore } from "@/store/onboardingStore";
 import { CheckCircle, Circle, RefreshCw, ArrowRight, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { TenantConnectForm } from "@/components/dashboard/TenantConnectForm";
+import { ConnectionAnimation } from "@/components/animations/ConnectionAnimation";
 
 // Step 1 Cards - Create Service Principal
 const servicePrincipalCards = [
@@ -62,6 +63,23 @@ export default function OnboardingPage() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [verifyingCard, setVerifyingCard] = useState<string | null>(null);
   const [isNavigating, setIsNavigating] = useState(false);
+  const [showConnectionAnimation, setShowConnectionAnimation] = useState(false);
+  const [animationCompleted, setAnimationCompleted] = useState(false);
+
+  // Start animation when entering step 3
+  useEffect(() => {
+    if (currentStep === 3) {
+      if (!animationCompleted) {
+        setShowConnectionAnimation(true);
+      }
+    } else {
+      // Reset animation state when leaving step 3
+      setShowConnectionAnimation(false);
+      setAnimationCompleted(false);
+      // Reset resource sync when leaving step 3
+      updateResourceSync({ status: "pending", progress: 0, syncedResources: 0, totalResources: 150 });
+    }
+  }, [currentStep, animationCompleted, updateResourceSync]);
 
   // Calculate progress
   useEffect(() => {
@@ -81,22 +99,12 @@ export default function OnboardingPage() {
     // Simulate API verification
     await new Promise(resolve => setTimeout(resolve, 2000));
     
-    // Mock verification - in production, call backend API
-    const success = Math.random() > 0.2; // 80% success rate for demo
-    
-    if (success) {
-      verifyCard(cardId);
-      toast({
-        title: "Verification successful",
-        description: "Assignment has been verified",
-      });
-    } else {
-      toast({
-        title: "Verification failed",
-        description: "Please ensure you've completed the command",
-        variant: "destructive",
-      });
-    }
+    // Always succeed for demo - in production, call backend API
+    verifyCard(cardId);
+    toast({
+      title: "Verification successful",
+      description: "Assignment has been verified",
+    });
     
     setVerifyingCard(null);
   };
@@ -142,28 +150,22 @@ export default function OnboardingPage() {
   };
 
   const handleSyncResources = async () => {
-    setIsSyncing(true);
-    updateResourceSync({ status: "syncing" });
+    setShowConnectionAnimation(true);
+  };
 
-    // Simulate resource sync
-    const totalResources = 150;
-    for (let i = 0; i <= totalResources; i += 10) {
-      await new Promise(resolve => setTimeout(resolve, 500));
-      updateResourceSync({
-        syncedResources: i,
-        totalResources,
-        progress: (i / totalResources) * 100,
-      });
-    }
-
-    updateResourceSync({ status: "completed", progress: 100 });
-    setIsSyncing(false);
-    completeStep(3);
-    setCurrentStep(4);
+  const handleConnectionAnimationComplete = () => {
+    setShowConnectionAnimation(false);
+    setAnimationCompleted(true);
+    updateResourceSync({ status: "completed", progress: 100, syncedResources: 150, totalResources: 150 });
     toast({
       title: "Sync completed",
       description: "All resources have been synced successfully",
     });
+  };
+
+  const handleCompleteSync = () => {
+    completeStep(3);
+    setCurrentStep(4);
   };
 
   const handleCompleteSetup = () => {
@@ -214,65 +216,71 @@ export default function OnboardingPage() {
 
       case 3:
         return (
-          <Card className="border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 max-w-xl mx-auto">
-            <CardHeader>
-              <CardTitle className="text-base font-semibold text-gray-900 dark:text-white">Sync Resources</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-5">
-              {resourceSync.status === "pending" && (
-                <div className="text-center py-10">
-                  <p className="text-gray-600 dark:text-slate-400 mb-5 text-sm">
-                    Click the button below to start syncing your Azure resources
-                  </p>
-                  <Button onClick={handleSyncResources} disabled={isSyncing} className="h-9 text-xs">
-                    {isSyncing ? (
-                      <>
-                        <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
-                        Syncing...
-                      </>
-                    ) : (
-                      "Start Sync"
-                    )}
-                  </Button>
-                </div>
-              )}
+          <>
+            {showConnectionAnimation ? (
+              <ConnectionAnimation onComplete={handleConnectionAnimationComplete} />
+            ) : (
+              <Card className="border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 max-w-xl mx-auto">
+                <CardHeader>
+                  <CardTitle className="text-base font-semibold text-gray-900 dark:text-white">Sync Resources</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-5">
+                  {resourceSync.status === "pending" && (
+                    <div className="text-center py-10">
+                      <p className="text-gray-600 dark:text-slate-400 mb-5 text-sm">
+                        Click the button below to start syncing your Azure resources
+                      </p>
+                      <Button onClick={handleSyncResources} disabled={isSyncing} className="h-9 text-xs">
+                        {isSyncing ? (
+                          <>
+                            <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                            Syncing...
+                          </>
+                        ) : (
+                          "Start Sync"
+                        )}
+                      </Button>
+                    </div>
+                  )}
 
-              {resourceSync.status === "syncing" && (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-medium text-gray-700 dark:text-slate-300">Syncing resources...</span>
-                    <RefreshCw className="h-3.5 w-3.5 animate-spin text-azure-500" />
-                  </div>
-                  <div className="bg-gray-100 dark:bg-slate-900 rounded-full h-1.5 overflow-hidden">
-                    <div
-                      className="bg-azure-500 h-full transition-all duration-500"
-                      style={{ width: `${resourceSync.progress}%` }}
-                    />
-                  </div>
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-gray-600 dark:text-slate-400">{resourceSync.syncedResources} / {resourceSync.totalResources} resources</span>
-                    <span className="font-medium text-gray-900 dark:text-white">{Math.round(resourceSync.progress)}%</span>
-                  </div>
-                </div>
-              )}
+                  {resourceSync.status === "syncing" && (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium text-gray-700 dark:text-slate-300">Syncing resources...</span>
+                        <RefreshCw className="h-3.5 w-3.5 animate-spin text-azure-500" />
+                      </div>
+                      <div className="bg-gray-100 dark:bg-slate-900 rounded-full h-1.5 overflow-hidden">
+                        <div
+                          className="bg-azure-500 h-full transition-all duration-500"
+                          style={{ width: `${resourceSync.progress}%` }}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-gray-600 dark:text-slate-400">{resourceSync.syncedResources} / {resourceSync.totalResources} resources</span>
+                        <span className="font-medium text-gray-900 dark:text-white">{Math.round(resourceSync.progress)}%</span>
+                      </div>
+                    </div>
+                  )}
 
-              {resourceSync.status === "completed" && (
-                <div className="text-center py-10">
-                  <CheckCircle className="h-16 w-16 text-emerald-500 mx-auto mb-5" />
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
-                    Sync Completed
-                  </h3>
-                  <p className="text-gray-600 dark:text-slate-400 mb-5 text-sm">
-                    Successfully synced {resourceSync.totalResources} resources
-                  </p>
-                  <Button onClick={() => setCurrentStep(4)} className="h-9 text-xs">
-                    Continue
-                    <ArrowRight className="ml-2 h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                  {resourceSync.status === "completed" && (
+                    <div className="text-center py-10">
+                      <CheckCircle className="h-16 w-16 text-emerald-500 mx-auto mb-5" />
+                      <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+                        Sync Completed
+                      </h3>
+                      <p className="text-gray-600 dark:text-slate-400 mb-5 text-sm">
+                        Successfully synced {resourceSync.totalResources} resources from Azure
+                      </p>
+                      <Button onClick={handleCompleteSync} className="h-9 text-xs">
+                        Complete
+                        <ArrowRight className="ml-2 h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+          </>
         );
 
       case 4:

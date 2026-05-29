@@ -1,8 +1,9 @@
 services:
   redis:
     image: redis:7-alpine
+    container_name: infralift-redis
     ports:
-      - "6379:6379"
+      - "6380:6379"
     volumes:
       - redis_data:/data
     command: redis-server --appendonly yes
@@ -11,32 +12,57 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - infralift-network
+    restart: unless-stopped
 
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    container_name: infralift-backend
     ports:
-      - "8000:8000"
+      - "8001:8000"
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - DEBUG=True
+      - PYTHONUNBUFFERED=1
     depends_on:
       redis:
         condition: service_healthy
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - infralift-network
+    restart: unless-stopped
+    volumes:
+      - ./backend:/app
+      - /app/__pycache__
+      - /app/.pytest_cache
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    container_name: infralift-frontend
     ports:
-      - "3000:3000"
+      - "3001:3000"
     environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NEXT_PUBLIC_API_URL=http://localhost:8001
+      - NODE_ENV=development
     depends_on:
       - backend
+    networks:
+      - infralift-network
+    restart: unless-stopped
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+
+networks:
+  infralift-network:
+    driver: bridge
 
 volumes:
   redis_data:
