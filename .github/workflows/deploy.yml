@@ -1,0 +1,13 @@
+name: Deploy (noop)
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  noop:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Note
+        run: echo "Manifests updated by CI; ArgoCD will sync automatically."

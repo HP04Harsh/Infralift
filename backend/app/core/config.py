@@ -21,10 +21,47 @@ class Settings(BaseSettings):
     # CORS Settings
     BACKEND_CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:3001"]
     
-    # Azure Settings (for future use)
+    # Azure Authentication Settings
     AZURE_CLIENT_ID: Optional[str] = None
     AZURE_CLIENT_SECRET: Optional[str] = None
     AZURE_TENANT_ID: Optional[str] = None
+    AZURE_SUBSCRIPTION_ID: Optional[str] = None
+    
+    # Azure OpenAI Settings
+    AZURE_OPENAI_ENDPOINT: Optional[str] = None
+    AZURE_OPENAI_KEY: Optional[str] = None
+    AZURE_OPENAI_DEPLOYMENT: Optional[str] = None
+    AZURE_OPENAI_API_VERSION: str = "2024-02-15-preview"
+    
+    # Azure Storage Settings
+    STORAGE_CONNECTION_STRING: Optional[str] = None
+    STORAGE_CONTAINER_NAME: str = "terraform-artifacts"
+    
+    # AI Provider Settings
+    AI_PROVIDER: str = "azure-openai"  # azure-openai, openai, claude, gemini, local
+    
+    # OpenAI Settings (if using direct OpenAI)
+    OPENAI_API_KEY: Optional[str] = None
+    OPENAI_MODEL: str = "gpt-4"
+    
+    # Anthropic Settings (if using Claude)
+    ANTHROPIC_API_KEY: Optional[str] = None
+    ANTHROPIC_MODEL: str = "claude-3-opus-20240229"
+    
+    # Gemini Settings (if using Google)
+    GEMINI_API_KEY: Optional[str] = None
+    GEMINI_MODEL: str = "gemini-pro"
+    
+    # Local LLM Settings (if using local)
+    LOCAL_LLM_ENDPOINT: Optional[str] = None
+    LOCAL_LLM_MODEL: str = "llama2"
+    
+    # Terraform Settings
+    TERRAFORM_VERSION: str = "1.5.0"
+    TERRAFORM_STATE_BACKEND: str = "azurerm"
+    
+    # WebSocket Settings
+    WS_HEARTBEAT_INTERVAL: int = 30
     
     class Config:
         env_file = ".env"

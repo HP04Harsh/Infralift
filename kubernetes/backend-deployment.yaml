@@ -1,0 +1,121 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: infralift-backend
+  namespace: default
+  labels:
+    app: infralift-backend
+    version: v1.1.0
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app: infralift-backend
+  template:
+    metadata:
+      labels:
+        app: infralift-backend
+        version: v1.1.0
+    spec:
+      containers:
+      - name: backend
+        image: YOUR_DOCKER_USERNAME/infralift-backend:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+          name: http
+          protocol: TCP
+        env:
+        - name: REDIS_HOST
+          value: "redis-service"
+        - name: REDIS_PORT
+          value: "6379"
+        - name: DEBUG
+          value: "True"
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        # Azure Environment Variables
+        - name: AZURE_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: azure-secrets
+              key: client-id
+        - name: AZURE_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: azure-secrets
+              key: client-secret
+        - name: AZURE_TENANT_ID
+          valueFrom:
+            secretKeyRef:
+              name: azure-secrets
+              key: tenant-id
+        - name: AZURE_SUBSCRIPTION_ID
+          valueFrom:
+            secretKeyRef:
+              name: azure-secrets
+              key: subscription-id
+        # Azure OpenAI Environment Variables
+        - name: AZURE_OPENAI_ENDPOINT
+          valueFrom:
+            secretKeyRef:
+              name: azure-openai-secrets
+              key: endpoint
+        - name: AZURE_OPENAI_KEY
+          valueFrom:
+            secretKeyRef:
+              name: azure-openai-secrets
+              key: api-key
+        - name: AZURE_OPENAI_DEPLOYMENT
+          valueFrom:
+            secretKeyRef:
+              name: azure-openai-secrets
+              key: deployment
+        # Storage Connection String
+        - name: STORAGE_CONNECTION_STRING
+          valueFrom:
+            secretKeyRef:
+              name: storage-secrets
+              key: connection-string
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+      restartPolicy: Always
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: infralift-backend-service
+  namespace: default
+  labels:
+    app: infralift-backend
+spec:
+  type: ClusterIP
+  selector:
+    app: infralift-backend
+  ports:
+  - port: 8000
+    targetPort: 8000
+    protocol: TCP
+    name: http
+  sessionAffinity: None

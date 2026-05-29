@@ -42,6 +42,7 @@ class TenantConnection(BaseModel):
     subscription_id: str
     display_name: str
     state: str
+    providers: Optional[Dict[str, Any]] = None
 
 
 class Resource(BaseModel):
@@ -59,6 +60,11 @@ class ResourceSync(BaseModel):
     progress: float = 0.0
     status: SyncStatus = SyncStatus.PENDING
     resources: List[Resource] = []
+    current_step: Optional[str] = None
+    resource_summary: Optional[Dict[str, int]] = None
+    message: Optional[str] = None
+    error: Optional[str] = None
+    synced_at: Optional[str] = None
 
 
 class Requirement(BaseModel):
@@ -92,8 +98,11 @@ class CompleteStepRequest(BaseModel):
 
 
 class ConnectTenantRequest(BaseModel):
+    client_id: str
+    client_secret: str
     tenant_id: str
     subscription_id: str
+    environment_name: str
     user_id: str
 
 
