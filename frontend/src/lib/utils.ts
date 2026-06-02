@@ -5,10 +5,13 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function copyToClipboard(text: string): Promise<boolean> {
-  return navigator.clipboard.writeText(text)
-    .then(() => true)
-    .catch(() => false);
+export async function copyToClipboard(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function formatPercentage(value: number): string {
