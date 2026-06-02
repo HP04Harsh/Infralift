@@ -2,19 +2,24 @@
 
 import { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
+import { useRouter } from "next/navigation";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Send, MessageCircle, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { TypingText } from "@/components/ui/typing-text";
+import { RGBText } from "@/components/ui/rgb-text";
+import { InstagramBorder } from "@/components/ui/instagram-border";
+import { AnimatedInput } from "@/components/ui/animated-input";
 
 interface DashboardHeroProps {
   userName?: string;
 }
 
-export function DashboardHero({ userName = "Harsh" }: DashboardHeroProps) {
+export function DashboardHero({ userName = "Harsh Pardhi" }: DashboardHeroProps) {
+  const router = useRouter();
   const [greeting, setGreeting] = useState("");
   const [inputValue, setInputValue] = useState("");
-  const inputRef = useRef<HTMLInputElement>(null);
 
   // Dynamic IST-based greeting
   useEffect(() => {
@@ -27,13 +32,13 @@ export function DashboardHero({ userName = "Harsh" }: DashboardHeroProps) {
       
       let greetingText = "";
       if (hours >= 5 && hours < 12) {
-        greetingText = `Good morning, ${userName} 👋`;
+        greetingText = `Good morning,`;
       } else if (hours >= 12 && hours < 17) {
-        greetingText = `Good afternoon, ${userName} 👋`;
+        greetingText = `Good afternoon,`;
       } else if (hours >= 17 && hours < 24) {
-        greetingText = `Good evening, ${userName} 👋`;
+        greetingText = `Good evening,`;
       } else {
-        greetingText = `Working late, ${userName} 👋`;
+        greetingText = `Working late,`;
       }
       
       setGreeting(greetingText);
@@ -43,7 +48,7 @@ export function DashboardHero({ userName = "Harsh" }: DashboardHeroProps) {
     const interval = setInterval(updateGreeting, 60000); // Update every minute
     
     return () => clearInterval(interval);
-  }, [userName]);
+  }, []);
 
   const quickActions = [
     {
@@ -64,13 +69,28 @@ export function DashboardHero({ userName = "Harsh" }: DashboardHeroProps) {
     },
   ];
 
+  const placeholderTexts = [
+    "Ask anything about your infrastructure...",
+    "How can I help you today?",
+    "What would you like to build?",
+  ];
+
   const handleQuickAction = (prompt: string) => {
     setInputValue(prompt);
-    // Focus input and move cursor to end
-    setTimeout(() => {
-      inputRef.current?.focus();
-      inputRef.current?.setSelectionRange(prompt.length, prompt.length);
-    }, 100);
+  };
+
+  const handleSend = () => {
+    if (inputValue.trim()) {
+      // Navigate to dashboard chat with the prompt
+      router.push(`/dashboard/chat?prompt=${encodeURIComponent(inputValue)}`);
+    }
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
   };
 
   return (
@@ -90,7 +110,7 @@ export function DashboardHero({ userName = "Harsh" }: DashboardHeroProps) {
             transition={{ duration: 0.5, delay: 0.1 }}
             className="text-2xl lg:text-3xl font-bold text-gray-900 dark:text-white mb-2"
           >
-            {greeting}
+            {greeting} <RGBText>{userName}</RGBText> 👋
           </motion.h1>
           <motion.p
             initial={{ opacity: 0, y: 10 }}
@@ -98,7 +118,7 @@ export function DashboardHero({ userName = "Harsh" }: DashboardHeroProps) {
             transition={{ duration: 0.5, delay: 0.2 }}
             className="text-sm text-gray-500 dark:text-slate-400"
           >
-            Your AI infrastructure assistant is ready to help
+            How can I help you build, manage and optimize your infrastructure today?
           </motion.p>
         </div>
 
@@ -122,20 +142,23 @@ export function DashboardHero({ userName = "Harsh" }: DashboardHeroProps) {
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: 0.4 }}
-          className="max-w-2xl mx-auto mb-5"
+          className="max-w-2xl mx-auto mb-4"
         >
           <div className="relative">
-            <MessageCircle className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400 dark:text-slate-500" />
-            <Input
-              ref={inputRef}
-              placeholder="Ask anything about your infrastructure..."
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              className="w-full h-12 pl-12 pr-24 rounded-full border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-azure-500 focus:border-transparent transition-all shadow-sm"
-            />
+            <MessageCircle className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400 dark:text-slate-500 z-20" />
+            <InstagramBorder>
+              <AnimatedInput
+                placeholderTexts={placeholderTexts}
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                onKeyPress={handleKeyPress}
+                className="w-full h-12 pl-12 pr-24"
+              />
+            </InstagramBorder>
             <Button
               size="sm"
-              className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 p-0 rounded-full bg-azure-500 hover:bg-azure-600 transition-colors"
+              onClick={handleSend}
+              className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 p-0 rounded-full bg-azure-500 hover:bg-azure-600 transition-colors z-20"
             >
               <Send className="h-4 w-4" />
             </Button>

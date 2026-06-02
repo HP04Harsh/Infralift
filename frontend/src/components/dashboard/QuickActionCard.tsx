@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { ArrowRight, Loader2 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 
 interface QuickActionCardProps {
@@ -10,17 +11,16 @@ interface QuickActionCardProps {
   description: string;
   icon: React.ReactNode;
   iconBg?: string;
+  path: string;
 }
 
-export function QuickActionCard({ title, description, icon, iconBg = "bg-gray-50 dark:bg-slate-700/50" }: QuickActionCardProps) {
+export function QuickActionCard({ title, description, icon, iconBg = "bg-gray-50 dark:bg-slate-700/50", path }: QuickActionCardProps) {
+  const router = useRouter();
   const [isNavigating, setIsNavigating] = useState(false);
 
   const handleClick = () => {
     setIsNavigating(true);
-    // Simulate navigation - pages not created yet
-    setTimeout(() => {
-      setIsNavigating(false);
-    }, 1500);
+    router.push(path);
   };
 
   return (

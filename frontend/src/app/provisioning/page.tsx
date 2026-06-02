@@ -74,36 +74,42 @@ export default function ProvisioningAgentPage() {
       description: "Organize and manage Azure resources",
       icon: <Layers className="h-5 w-5 text-blue-600" />,
       iconBg: "bg-blue-100 dark:bg-blue-900/40",
+      prompt: "I want to create a Resource Group in Central India for production workloads with proper tagging and monitoring enabled.",
     },
     {
       title: "Virtual Machine",
       description: "Deploy scalable compute resources",
       icon: <Server className="h-5 w-5 text-purple-600" />,
       iconBg: "bg-purple-100 dark:bg-purple-900/40",
+      prompt: "I want to deploy a Virtual Machine in Central India with Ubuntu 22.04 LTS, Standard B2s size, and monitoring enabled.",
     },
     {
       title: "Storage Account",
       description: "Cloud storage for data objects",
       icon: <Database className="h-5 w-5 text-green-600" />,
       iconBg: "bg-green-100 dark:bg-green-900/40",
+      prompt: "I want to create a Storage Account in Central India with Standard LRS redundancy and General Purpose v2.",
     },
     {
       title: "AKS Cluster",
       description: "Managed Kubernetes service",
       icon: <Container className="h-5 w-5 text-indigo-600" />,
       iconBg: "bg-indigo-100 dark:bg-indigo-900/40",
+      prompt: "I want to deploy an AKS cluster in Central India with 3 nodes and Standard D2s v3 VM size with monitoring enabled.",
     },
     {
       title: "App Service",
       description: "Host web applications and APIs",
       icon: <Cloud className="h-5 w-5 text-cyan-600" />,
       iconBg: "bg-cyan-100 dark:bg-cyan-900/40",
+      prompt: "I want to deploy an App Service in Central India with Node.js runtime and Standard S1 App Service Plan.",
     },
     {
       title: "Networking",
       description: "VNet, subnets, and security rules",
       icon: <Network className="h-5 w-5 text-amber-600" />,
       iconBg: "bg-amber-100 dark:bg-amber-900/40",
+      prompt: "I want to configure networking with a virtual network (10.0.0.0/16), 3 subnets, and network security groups in Central India.",
     },
   ];
 
@@ -143,11 +149,20 @@ export default function ProvisioningAgentPage() {
                     <LayoutDashboardIcon className="h-4 w-4 mr-2" />
                     Go to Dashboard
                   </Button>
-                  <Button variant="outline" size="sm" className="h-8">
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => router.push('/provisioning/history')}
+                    className="h-8"
+                  >
                     <History className="h-4 w-4 mr-2" />
                     Deployment History
                   </Button>
-                  <Button size="sm" className="h-8 bg-azure-500 hover:bg-azure-600">
+                  <Button 
+                    size="sm" 
+                    onClick={() => router.push('/provisioning/chat')}
+                    className="h-8 bg-azure-500 hover:bg-azure-600"
+                  >
                     <Plus className="h-4 w-4 mr-2" />
                     New Deployment
                   </Button>
@@ -161,6 +176,7 @@ export default function ProvisioningAgentPage() {
               icon={<Activity className="h-5 w-5 text-azure-500" />}
               quickActions={quickActions}
               placeholderVariants={placeholderVariants}
+              agentType="provisioning"
               className="mb-6"
             />
 
@@ -182,6 +198,7 @@ export default function ProvisioningAgentPage() {
                           animate={{ opacity: 1, y: 0 }}
                           transition={{ duration: 0.3, delay: index * 0.05 }}
                           whileHover={{ y: -4, boxShadow: "0 12px 30px rgba(0, 0, 0, 0.12)" }}
+                          onClick={() => router.push(`/provisioning/chat?prompt=${encodeURIComponent(template.prompt)}`)}
                           className="border border-gray-200/50 dark:border-slate-700/50 bg-white dark:bg-slate-800 rounded-xl p-4 cursor-pointer transition-all hover:border-azure-300/50 dark:hover:border-azure-700/50 hover:shadow-lg"
                         >
                           <div className={cn("w-10 h-10 rounded-lg flex items-center justify-center mb-3", template.iconBg)}>

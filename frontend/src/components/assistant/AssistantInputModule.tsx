@@ -1,11 +1,13 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { MessageCircle, Send } from "lucide-react";
-import { Input } from "@/components/ui/input";
+import { useState, useRef } from "react";
+import { motion } from "framer-motion";
+import { useRouter } from "next/navigation";
+import { Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { InstagramBorder } from "@/components/ui/instagram-border";
+import { AnimatedInput } from "@/components/ui/animated-input";
 
 interface QuickAction {
   label: string;
@@ -20,6 +22,7 @@ interface AssistantInputModuleProps {
   quickActions: QuickAction[];
   placeholderVariants: string[];
   className?: string;
+  agentType?: string; // 'provisioning', 'assessment', etc.
   onSubmit?: (value: string) => void;
 }
 
@@ -29,34 +32,34 @@ export function AssistantInputModule({
   quickActions,
   placeholderVariants,
   className,
+  agentType,
   onSubmit,
 }: AssistantInputModuleProps) {
+  const router = useRouter();
   const [inputValue, setInputValue] = useState("");
-  const [currentPlaceholderIndex, setCurrentPlaceholderIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Animate placeholders
-  useEffect(() => {
-    if (inputValue) return; // Don't rotate while typing
-
-    const interval = setInterval(() => {
-      setCurrentPlaceholderIndex((prev) => (prev + 1) % placeholderVariants.length);
-    }, 4000); // Rotate every 4 seconds
-
-    return () => clearInterval(interval);
-  }, [inputValue, placeholderVariants.length]);
-
   const handleQuickAction = (prompt: string) => {
-    setInputValue(prompt);
-    setTimeout(() => {
-      inputRef.current?.focus();
-      inputRef.current?.setSelectionRange(prompt.length, prompt.length);
-    }, 100);
+    if (agentType) {
+      // Navigate to the agent's chat page with the prompt pre-populated
+      router.push(`/${agentType}/chat?prompt=${encodeURIComponent(prompt)}`);
+    } else {
+      setInputValue(prompt);
+      setTimeout(() => {
+        inputRef.current?.focus();
+        inputRef.current?.setSelectionRange(prompt.length, prompt.length);
+      }, 100);
+    }
   };
 
   const handleSubmit = () => {
     if (inputValue.trim()) {
-      onSubmit?.(inputValue);
+      if (agentType) {
+        // Navigate to the agent's chat page with the prompt pre-populated
+        router.push(`/${agentType}/chat?prompt=${encodeURIComponent(inputValue)}`);
+      } else {
+        onSubmit?.(inputValue);
+      }
       setInputValue("");
     }
   };
@@ -81,45 +84,29 @@ export function AssistantInputModule({
       )}
 
       {/* AI Input Box */}
-      <div className="max-w-4xl mx-auto mb-5">
-        <div className="relative flex items-center">
-          <MessageCircle className="absolute left-5 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400 dark:text-slate-500 z-10" />
-          <div className="flex-1 relative">
-            <AnimatePresence mode="wait">
-              {!inputValue && (
-                <motion.div
-                  key={currentPlaceholderIndex}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  transition={{ duration: 0.3 }}
-                  className="absolute inset-0 flex items-center justify-center pointer-events-none z-0"
-                >
-                  <span className="text-sm text-gray-400 dark:text-slate-500 text-center px-14">
-                    {placeholderVariants[currentPlaceholderIndex]}
-                  </span>
-                </motion.div>
-              )}
-            </AnimatePresence>
-            <Input
+      <div className="max-w-4xl mx-auto">
+        <InstagramBorder className="w-full">
+          <div className="relative flex items-center">
+            <AnimatedInput
               ref={inputRef}
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyPress={handleKeyPress}
-              className="w-full h-16 pl-14 pr-28 rounded-2xl border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-azure-500 focus:border-transparent transition-all shadow-md text-base text-center"
+              placeholderTexts={placeholderVariants}
+              className="h-16 pr-14 rounded-2xl text-base text-left bg-transparent"
             />
+            <Button
+              size="sm"
+              onClick={handleSubmit}
+              className="absolute right-3 top-1/2 -translate-y-1/2 h-10 w-10 p-0 rounded-xl bg-azure-500 hover:bg-azure-600 transition-colors z-10"
+            >
+              <Send className="h-5 w-5" />
+            </Button>
           </div>
-          <Button
-            size="sm"
-            onClick={handleSubmit}
-            className="absolute right-3 top-1/2 -translate-y-1/2 h-10 w-10 p-0 rounded-xl bg-azure-500 hover:bg-azure-600 transition-colors z-10"
-          >
-            <Send className="h-5 w-5" />
-          </Button>
-        </div>
+        </InstagramBorder>
 
         {/* Prompt Capsules */}
-        <div className="flex flex-wrap justify-center gap-2 mt-3">
+        <div className="flex flex-wrap justify-center gap-2 mt-6">
           {quickActions.map((action, index) => (
             <motion.button
               key={index}

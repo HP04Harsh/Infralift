@@ -9,7 +9,6 @@ const inter = Inter({ subsets: ["latin"] });
 export const metadata: Metadata = {
   title: "Infralift - Azure Infrastructure Automation Platform",
   description: "Production-grade Azure automation platform for enterprise DevOps",
-  version: "1.1.0",
 };
 
 export default function RootLayout({

@@ -74,6 +74,7 @@ export default function OptimizationAgentPage() {
       icon: <Server className="h-5 w-5 text-blue-600" />,
       iconBg: "bg-blue-100 dark:bg-blue-900/40",
       savings: "$340/mo",
+      prompt: "I want to optimize my virtual machine sizes based on actual usage patterns. Please analyze CPU, memory, and disk usage across all VMs, identify over-provisioned resources, recommend appropriate VM sizes for right-sizing, and provide estimated cost savings.",
     },
     {
       title: "Reserved Instances",
@@ -81,6 +82,7 @@ export default function OptimizationAgentPage() {
       icon: <Clock className="h-5 w-5 text-green-600" />,
       iconBg: "bg-green-100 dark:bg-green-900/40",
       savings: "$1,200/mo",
+      prompt: "I want to optimize costs using Azure Reserved Instances. Please analyze my workload patterns, identify resources that would benefit from reserved instances, recommend the best reservation terms (1-year, 3-year), and calculate potential savings compared to pay-as-you-go pricing.",
     },
     {
       title: "Storage Optimization",
@@ -88,6 +90,7 @@ export default function OptimizationAgentPage() {
       icon: <Database className="h-5 w-5 text-purple-600" />,
       iconBg: "bg-purple-100 dark:bg-purple-900/40",
       savings: "$180/mo",
+      prompt: "I want to optimize my Azure storage costs. Please analyze storage usage across all storage accounts, identify opportunities for tier optimization (hot, cool, archive), find unused or stale data that can be deleted or archived, and provide recommendations for cost reduction.",
     },
     {
       title: "Idle Resources",
@@ -95,6 +98,7 @@ export default function OptimizationAgentPage() {
       icon: <Zap className="h-5 w-5 text-amber-600" />,
       iconBg: "bg-amber-100 dark:bg-amber-900/40",
       savings: "$520/mo",
+      prompt: "I want to identify and remove idle or unused Azure resources. Please analyze all resources for inactivity, identify orphaned resources (disks, NICs, IPs with no parent), find resources with zero usage over the past 30 days, and provide a cleanup plan with estimated cost savings.",
     },
     {
       title: "Database Optimization",
@@ -102,6 +106,7 @@ export default function OptimizationAgentPage() {
       icon: <Layers className="h-5 w-5 text-cyan-600" />,
       iconBg: "bg-cyan-100 dark:bg-cyan-900/40",
       savings: "$290/mo",
+      prompt: "I want to optimize my Azure database costs and performance. Please analyze database configurations, identify over-provisioned compute and storage, recommend appropriate service tiers and performance levels, and provide optimization recommendations for both SQL and NoSQL databases.",
     },
     {
       title: "Spot Instances",
@@ -109,14 +114,15 @@ export default function OptimizationAgentPage() {
       icon: <Target className="h-5 w-5 text-indigo-600" />,
       iconBg: "bg-indigo-100 dark:bg-indigo-900/40",
       savings: "$450/mo",
+      prompt: "I want to leverage Azure Spot Instances for cost savings. Please identify workloads suitable for spot instances (batch processing, dev/test, fault-tolerant apps), recommend implementation strategies, and provide guidance on handling spot instance evictions and ensuring high availability.",
     },
   ];
 
   const topRecommendations = [
-    { id: 1, title: "Downsize prod-web-001 from D4s_v3 to D2s_v3", savings: "$120/mo", effort: "Low", status: "pending" },
-    { id: 2, title: "Purchase reserved instances for database cluster", savings: "$800/mo", effort: "Medium", status: "pending" },
-    { id: 3, title: "Delete unused storage account legacy-backup-01", savings: "$45/mo", effort: "Low", status: "pending" },
-    { id: 4, title: "Migrate dev VMs to spot instances", savings: "$320/mo", effort: "Medium", status: "pending" },
+    { id: 1, title: "Downsize prod-web-001 from D4s_v3 to D2s_v3", savings: "$120/mo", effort: "Low", status: "pending", prompt: "I want to implement the recommendation to downsize prod-web-001 from D4s_v3 to D2s_v3. Please analyze the current resource usage, verify that D2s_v3 can handle the workload, provide a safe resizing plan, and estimate the cost savings." },
+    { id: 2, title: "Purchase reserved instances for database cluster", savings: "$800/mo", effort: "Medium", status: "pending", prompt: "I want to implement the recommendation to purchase reserved instances for the database cluster. Please analyze the workload patterns, determine the best reservation term (1-year or 3-year), calculate the total savings, and provide a step-by-step implementation plan." },
+    { id: 3, title: "Delete unused storage account legacy-backup-01", savings: "$45/mo", effort: "Low", status: "pending", prompt: "I want to implement the recommendation to delete the unused storage account legacy-backup-01. Please verify that there are no active references to this storage account, check if there are any important files that need to be preserved, and provide a safe deletion plan." },
+    { id: 4, title: "Migrate dev VMs to spot instances", savings: "$320/mo", effort: "Medium", status: "pending", prompt: "I want to implement the recommendation to migrate development VMs to spot instances. Please identify which VMs are suitable for spot instances, analyze the workload patterns, provide guidance on handling spot instance evictions, and create a migration plan with high availability considerations." },
   ];
 
   return (
@@ -159,6 +165,7 @@ export default function OptimizationAgentPage() {
               icon={<TrendingDown className="h-5 w-5 text-azure-500" />}
               quickActions={quickActions}
               placeholderVariants={placeholderVariants}
+              agentType="optimization"
               className="mb-6"
             />
 
@@ -207,6 +214,7 @@ export default function OptimizationAgentPage() {
                           animate={{ opacity: 1, y: 0 }}
                           transition={{ duration: 0.3, delay: index * 0.05 }}
                           whileHover={{ y: -4, boxShadow: "0 8px 25px rgba(0, 0, 0, 0.1)" }}
+                          onClick={() => router.push(`/optimization/chat?prompt=${encodeURIComponent(category.prompt)}`)}
                           className="border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-xl p-4 cursor-pointer transition-all hover:border-azure-300 dark:hover:border-azure-700"
                         >
                           <div className={cn("w-10 h-10 rounded-lg flex items-center justify-center mb-3", category.iconBg)}>
@@ -267,7 +275,11 @@ export default function OptimizationAgentPage() {
                               </span>
                             </div>
                           </div>
-                          <Button size="sm" className="h-8 flex-shrink-0">
+                          <Button 
+                            size="sm" 
+                            onClick={() => router.push(`/optimization/chat?prompt=${encodeURIComponent(rec.prompt)}`)}
+                            className="h-8 flex-shrink-0"
+                          >
                             Apply
                           </Button>
                         </motion.div>

@@ -61,7 +61,7 @@ export const useOnboardingStore = create<OnboardingState>()(
 
       completeStep: (step) =>
         set((state) => ({
-          completedSteps: [...new Set([...state.completedSteps, step])],
+          completedSteps: Array.from(new Set([...state.completedSteps, step])),
         })),
 
       setOnboardingData: (data) =>

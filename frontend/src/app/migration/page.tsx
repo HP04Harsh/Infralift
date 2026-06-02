@@ -74,36 +74,42 @@ export default function MigrationAgentPage() {
       description: "Migrate VMs and infrastructure as-is",
       icon: <Server className="h-5 w-5 text-blue-600" />,
       iconBg: "bg-blue-100 dark:bg-blue-900/40",
+      prompt: "I want to perform a lift and shift migration of my on-premises virtual machines to Azure. Please analyze my current infrastructure, recommend the appropriate Azure VM sizes, network configuration, and migration strategy using Azure Migrate. Include considerations for data transfer, downtime, and post-migration validation.",
     },
     {
       title: "Replatform",
       description: "Modernize applications during migration",
       icon: <Container className="h-5 w-5 text-purple-600" />,
       iconBg: "bg-purple-100 dark:bg-purple-900/40",
+      prompt: "I want to migrate and modernize my applications to Azure with containerization. Please analyze my current application architecture, recommend containerization strategy using Docker, deployment to Azure Kubernetes Service or Container Apps, and provide a modernization roadmap.",
     },
     {
       title: "Database Migration",
       description: "Migrate databases to Azure SQL/PostgreSQL",
       icon: <Database className="h-5 w-5 text-green-600" />,
       iconBg: "bg-green-100 dark:bg-green-900/40",
+      prompt: "I want to migrate my on-premises databases to Azure. Please analyze my current database infrastructure (SQL Server, Oracle, MySQL), recommend the appropriate Azure database service (Azure SQL Database, SQL Managed Instance, Azure Database for MySQL/PostgreSQL), and provide a migration plan using Azure Database Migration Service.",
     },
     {
       title: "VM Migration",
       description: "Migrate virtual machines to Azure",
       icon: <Server className="h-5 w-5 text-cyan-600" />,
       iconBg: "bg-cyan-100 dark:bg-cyan-900/40",
+      prompt: "I want to migrate my virtual machines from on-premises or another cloud to Azure. Please analyze my current VM infrastructure, recommend the appropriate Azure VM series and sizes, plan the network configuration, and provide a step-by-step migration strategy using Azure Migrate.",
     },
     {
       title: "Storage Migration",
       description: "Migrate storage accounts and data",
       icon: <HardDrive className="h-5 w-5 text-amber-600" />,
       iconBg: "bg-amber-100 dark:bg-amber-900/40",
+      prompt: "I want to migrate my data to Azure storage. Please analyze my current storage infrastructure, recommend the appropriate Azure storage services (Blob Storage, Azure Files, Data Lake Storage), and provide a data migration plan using Azure Data Factory, AzCopy, or Azure Storage Explorer.",
     },
     {
       title: "App Migration",
       description: "Migrate applications to App Service",
       icon: <Cloud className="h-5 w-5 text-indigo-600" />,
       iconBg: "bg-indigo-100 dark:bg-indigo-900/40",
+      prompt: "I want to migrate my web applications to Azure App Service. Please analyze my current application stack, recommend the appropriate App Service plan and runtime, plan the migration process, and provide configuration recommendations for scaling, monitoring, and deployment pipelines.",
     },
   ];
 
@@ -143,11 +149,20 @@ export default function MigrationAgentPage() {
                     <LayoutDashboardIcon className="h-4 w-4 mr-2" />
                     Go to Dashboard
                   </Button>
-                  <Button variant="outline" size="sm" className="h-8">
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => router.push('/migration/history')}
+                    className="h-8"
+                  >
                     <History className="h-4 w-4 mr-2" />
                     Migration History
                   </Button>
-                  <Button size="sm" className="h-8 bg-azure-500 hover:bg-azure-600">
+                  <Button 
+                    size="sm" 
+                    onClick={() => router.push('/migration/chat')}
+                    className="h-8 bg-azure-500 hover:bg-azure-600"
+                  >
                     <Plus className="h-4 w-4 mr-2" />
                     New Migration
                   </Button>
@@ -161,6 +176,7 @@ export default function MigrationAgentPage() {
               icon={<TrendingUp className="h-5 w-5 text-azure-500" />}
               quickActions={quickActions}
               placeholderVariants={placeholderVariants}
+              agentType="migration"
               className="mb-6"
             />
 
@@ -182,6 +198,7 @@ export default function MigrationAgentPage() {
                           animate={{ opacity: 1, y: 0 }}
                           transition={{ duration: 0.3, delay: index * 0.05 }}
                           whileHover={{ y: -4, boxShadow: "0 8px 25px rgba(0, 0, 0, 0.1)" }}
+                          onClick={() => router.push(`/migration/chat?prompt=${encodeURIComponent(scenario.prompt)}`)}
                           className="border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-xl p-4 cursor-pointer transition-all hover:border-azure-300 dark:hover:border-azure-700"
                         >
                           <div className={cn("w-10 h-10 rounded-lg flex items-center justify-center mb-3", scenario.iconBg)}>

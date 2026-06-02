@@ -3,11 +3,9 @@
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { User, Settings, LogOut, UserCircle, Sun, Moon } from "lucide-react";
+import { User, Settings, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { ThemeToggle } from "@/components/ui/theme-toggle";
-import { useThemeStore } from "@/store/themeStore";
 
 interface ProfileDropdownProps {
   userName: string;
@@ -18,7 +16,6 @@ interface ProfileDropdownProps {
 export function ProfileDropdown({ userName, isOpen, onClose }: ProfileDropdownProps) {
   const router = useRouter();
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const { theme } = useThemeStore();
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -47,12 +44,6 @@ export function ProfileDropdown({ userName, isOpen, onClose }: ProfileDropdownPr
 
   const handleSettings = () => {
     router.push('/settings');
-    onClose();
-  };
-
-  const handleProfile = () => {
-    // Navigate to profile page (to be implemented)
-    console.log("Profile clicked");
     onClose();
   };
 
@@ -98,34 +89,12 @@ export function ProfileDropdown({ userName, isOpen, onClose }: ProfileDropdownPr
             {/* Menu Items */}
             <div className="p-2 space-y-1">
               <button
-                onClick={handleProfile}
-                className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-lg transition-all duration-200 group"
-              >
-                <UserCircle className="h-4 w-4 text-gray-500 dark:text-slate-400 group-hover:text-azure-500 dark:group-hover:text-azure-400 transition-colors" />
-                <span className="font-medium">Profile</span>
-              </button>
-              
-              <button
                 onClick={handleSettings}
                 className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-lg transition-all duration-200 group"
               >
                 <Settings className="h-4 w-4 text-gray-500 dark:text-slate-400 group-hover:text-azure-500 dark:group-hover:text-azure-400 transition-colors" />
                 <span className="font-medium">Settings</span>
               </button>
-
-              <div className="flex items-center justify-between px-3 py-2.5">
-                <div className="flex items-center gap-3">
-                  {theme === 'dark' ? (
-                    <Moon className="h-4 w-4 text-gray-500 dark:text-slate-400" />
-                  ) : (
-                    <Sun className="h-4 w-4 text-gray-500 dark:text-slate-400" />
-                  )}
-                  <span className="text-sm text-gray-700 dark:text-slate-300 font-medium">
-                    {theme === 'dark' ? 'Dark Mode' : 'Light Mode'}
-                  </span>
-                </div>
-                <ThemeToggle />
-              </div>
 
               <div className="h-px bg-gray-200 dark:bg-slate-700 my-1" />
 

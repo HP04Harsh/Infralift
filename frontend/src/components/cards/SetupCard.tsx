@@ -48,7 +48,6 @@ export function SetupCard({
       toast({
         title: "Failed to copy",
         description: "Please copy the command manually",
-        variant: "destructive",
       });
     }
   };

@@ -1,6 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
+import { useState } from "react";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/button";
@@ -8,13 +9,24 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AssistantInputModule } from "@/components/assistant/AssistantInputModule";
 import { 
   AlertTriangle, FileText, Settings, 
-  HelpCircle, Plus, Clock, CheckCircle, User, Ticket, Activity, LayoutDashboard as LayoutDashboardIcon
+  HelpCircle, Plus, Search, Clock, CheckCircle, User, Ticket, Activity, LayoutDashboard as LayoutDashboardIcon
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
 
 export default function ITSMAgentPage() {
   const router = useRouter();
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sortConfig, setSortConfig] = useState<{column: string; direction: "asc" | "desc"} | null>(null);
+
+  const handleSort = (column: string) => {
+    setSortConfig(prev => {
+      if (prev?.column === column) {
+        return { column, direction: prev.direction === "asc" ? "desc" : "asc" };
+      }
+      return { column, direction: "asc" };
+    });
+  };
 
   const quickActions = [
     {
@@ -73,24 +85,28 @@ export default function ITSMAgentPage() {
       description: "Report unplanned service interruptions",
       icon: <AlertTriangle className="h-5 w-5 text-red-600" />,
       iconBg: "bg-red-100 dark:bg-red-900/40",
+      prompt: "I want to create a new incident ticket. Please help me report an unplanned service interruption affecting [service name]. The issue is [description], impact is [low/medium/high/critical], and priority should be [priority level]. Please create the incident with appropriate details and assign it to the right team.",
     },
     {
       title: "Service Request",
       description: "Request IT services or information",
       icon: <HelpCircle className="h-5 w-5 text-blue-600" />,
       iconBg: "bg-blue-100 dark:bg-blue-900/40",
+      prompt: "I want to create a service request. Please help me request [service or information] with the following details: [specific requirements]. Include any necessary approvals, estimated completion time, and assign it to the appropriate team.",
     },
     {
       title: "Change Request",
       description: "Request changes to IT infrastructure",
       icon: <Settings className="h-5 w-5 text-purple-600" />,
       iconBg: "bg-purple-100 dark:bg-purple-900/40",
+      prompt: "I want to create a change request for [change description]. Please help me document the change including impact assessment, risk analysis, rollback plan, approval requirements, and implementation timeline. Ensure all necessary stakeholders are identified.",
     },
     {
       title: "Problem",
       description: "Report underlying causes of incidents",
       icon: <FileText className="h-5 w-5 text-amber-600" />,
       iconBg: "bg-amber-100 dark:bg-amber-900/40",
+      prompt: "I want to create a problem ticket to investigate the root cause of recurring incidents. Please help me document the problem including incident history, known errors, workarounds, and investigation plan. Assign to the appropriate team for root cause analysis.",
     },
   ];
 
@@ -100,6 +116,28 @@ export default function ITSMAgentPage() {
     { id: "CR-015", title: "Database upgrade", type: "Change Request", priority: "High", status: "Approved", assignee: "DB Team", time: "1 day ago" },
     { id: "PRB-008", title: "Recurring backup failures", type: "Problem", priority: "High", status: "Investigating", assignee: "Harsh Pardhi", time: "2 days ago" },
   ];
+
+  const filteredAndSortedTickets = recentTickets
+    .filter(ticket => {
+      if (!searchQuery) return true;
+      const q = searchQuery.toLowerCase();
+      return (
+        ticket.id.toLowerCase().includes(q) ||
+        ticket.title.toLowerCase().includes(q) ||
+        ticket.type.toLowerCase().includes(q) ||
+        ticket.priority.toLowerCase().includes(q) ||
+        ticket.status.toLowerCase().includes(q) ||
+        ticket.assignee.toLowerCase().includes(q) ||
+        ticket.time.toLowerCase().includes(q)
+      );
+    })
+    .sort((a, b) => {
+      if (!sortConfig) return 0;
+      const aVal = String(a[sortConfig.column as keyof typeof a] ?? "").toLowerCase();
+      const bVal = String(b[sortConfig.column as keyof typeof b] ?? "").toLowerCase();
+      const dir = sortConfig.direction === "asc" ? 1 : -1;
+      return aVal.localeCompare(bVal) * dir;
+    });
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
@@ -163,7 +201,11 @@ export default function ITSMAgentPage() {
                     <LayoutDashboardIcon className="h-4 w-4 mr-2" />
                     Go to Dashboard
                   </Button>
-                  <Button size="sm" className="h-8 bg-azure-500 hover:bg-azure-600">
+                  <Button 
+                    size="sm" 
+                    onClick={() => router.push('/itsm/chat')}
+                    className="h-8 bg-azure-500 hover:bg-azure-600"
+                  >
                     <Plus className="h-4 w-4 mr-2" />
                     New Ticket
                   </Button>
@@ -199,6 +241,7 @@ export default function ITSMAgentPage() {
                           animate={{ opacity: 1, y: 0 }}
                           transition={{ duration: 0.3, delay: index * 0.05 }}
                           whileHover={{ y: -4, boxShadow: "0 8px 25px rgba(0, 0, 0, 0.1)" }}
+                          onClick={() => router.push(`/itsm/chat?prompt=${encodeURIComponent(card.prompt)}`)}
                           className="border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-xl p-4 cursor-pointer transition-all hover:border-azure-300 dark:hover:border-azure-700"
                         >
                           <div className={cn("w-10 h-10 rounded-lg flex items-center justify-center mb-3", card.iconBg)}>
@@ -225,21 +268,54 @@ export default function ITSMAgentPage() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
+                    <div className="mb-4">
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                        <input
+                          type="text"
+                          placeholder="Search tickets..."
+                          value={searchQuery}
+                          onChange={e => setSearchQuery(e.target.value)}
+                          className="w-full pl-10 pr-4 py-2 text-sm border border-gray-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-azure-500"
+                        />
+                      </div>
+                    </div>
                     <div className="overflow-x-auto">
                       <table className="w-full">
                         <thead>
                           <tr className="border-b border-gray-200 dark:border-slate-700">
-                            <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 dark:text-slate-400 min-w-[100px]">Ticket ID</th>
-                            <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 dark:text-slate-400 min-w-[180px]">Title</th>
-                            <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 dark:text-slate-400 min-w-[100px]">Type</th>
-                            <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 dark:text-slate-400 min-w-[80px]">Priority</th>
-                            <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 dark:text-slate-400 min-w-[100px]">Status</th>
-                            <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 dark:text-slate-400 min-w-[120px]">Assignee</th>
-                            <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 dark:text-slate-400 min-w-[100px]">Time</th>
+                            <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 dark:text-slate-400 min-w-[100px] cursor-pointer select-none hover:text-gray-700 dark:hover:text-slate-300"
+                                onClick={() => handleSort("id")}>
+                              Ticket ID {sortConfig?.column === "id" && (sortConfig.direction === "asc" ? "\u2191" : "\u2193")}
+                            </th>
+                            <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 dark:text-slate-400 min-w-[180px] cursor-pointer select-none hover:text-gray-700 dark:hover:text-slate-300"
+                                onClick={() => handleSort("title")}>
+                              Title {sortConfig?.column === "title" && (sortConfig.direction === "asc" ? "\u2191" : "\u2193")}
+                            </th>
+                            <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 dark:text-slate-400 min-w-[100px] cursor-pointer select-none hover:text-gray-700 dark:hover:text-slate-300"
+                                onClick={() => handleSort("type")}>
+                              Type {sortConfig?.column === "type" && (sortConfig.direction === "asc" ? "\u2191" : "\u2193")}
+                            </th>
+                            <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 dark:text-slate-400 min-w-[80px] cursor-pointer select-none hover:text-gray-700 dark:hover:text-slate-300"
+                                onClick={() => handleSort("priority")}>
+                              Priority {sortConfig?.column === "priority" && (sortConfig.direction === "asc" ? "\u2191" : "\u2193")}
+                            </th>
+                            <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 dark:text-slate-400 min-w-[100px] cursor-pointer select-none hover:text-gray-700 dark:hover:text-slate-300"
+                                onClick={() => handleSort("status")}>
+                              Status {sortConfig?.column === "status" && (sortConfig.direction === "asc" ? "\u2191" : "\u2193")}
+                            </th>
+                            <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 dark:text-slate-400 min-w-[120px] cursor-pointer select-none hover:text-gray-700 dark:hover:text-slate-300"
+                                onClick={() => handleSort("assignee")}>
+                              Assignee {sortConfig?.column === "assignee" && (sortConfig.direction === "asc" ? "\u2191" : "\u2193")}
+                            </th>
+                            <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 dark:text-slate-400 min-w-[100px] cursor-pointer select-none hover:text-gray-700 dark:hover:text-slate-300"
+                                onClick={() => handleSort("time")}>
+                              Time {sortConfig?.column === "time" && (sortConfig.direction === "asc" ? "\u2191" : "\u2193")}
+                            </th>
                           </tr>
                         </thead>
                         <tbody>
-                          {recentTickets.map((ticket) => (
+                          {filteredAndSortedTickets.map((ticket) => (
                             <tr key={ticket.id} className="border-b border-gray-100 dark:border-slate-800 hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors">
                               <td className="py-3 px-4 text-sm font-medium text-azure-600 dark:text-azure-400">{ticket.id}</td>
                               <td className="py-3 px-4 text-sm text-gray-900 dark:text-white">{ticket.title}</td>
@@ -264,9 +340,8 @@ export default function ITSMAgentPage() {
                                 <User className="h-3 w-3" />
                                 {ticket.assignee}
                               </td>
-                              <td className="py-3 px-4 text-sm text-gray-500 dark:text-slate-400 flex items-center gap-1">
-                                <Clock className="h-3 w-3" />
-                                {ticket.time}
+                              <td className="py-3 px-4 text-sm text-gray-500 dark:text-slate-400">
+                                <span>{ticket.time}</span>
                               </td>
                             </tr>
                           ))}

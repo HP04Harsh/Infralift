@@ -29,7 +29,6 @@ export function UserManagement() {
       toast({
         title: "Missing information",
         description: "Please fill in all required fields",
-        variant: "destructive",
       });
       return;
     }
@@ -39,7 +38,6 @@ export function UserManagement() {
       toast({
         title: "Username exists",
         description: "A user with this username already exists",
-        variant: "destructive",
       });
       return;
     }
@@ -84,7 +82,6 @@ export function UserManagement() {
       toast({
         title: "Cannot delete admin",
         description: "The admin user cannot be deleted",
-        variant: "destructive",
       });
       return;
     }

@@ -11,9 +11,24 @@ import { motion } from "framer-motion";
 import { Server, AlertTriangle, DollarSign, Shield, Cloud, Activity, Play, FileText, CreditCard, LayoutDashboard, BarChart3 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useRouter } from "next/navigation";
+import { useEffect } from "react";
+import { useOnboardingStore } from "@/store/onboardingStore";
 
 export default function DashboardPage() {
   const router = useRouter();
+  const { progress } = useOnboardingStore();
+
+  // Guard: Redirect to onboarding if not completed
+  useEffect(() => {
+    if (progress < 100) {
+      router.push("/onboarding");
+    }
+  }, [progress, router]);
+
+  // Show loading state while checking
+  if (progress < 100) {
+    return null;
+  }
 
   // Initial empty state metrics with colored icons
   const metricCards = [

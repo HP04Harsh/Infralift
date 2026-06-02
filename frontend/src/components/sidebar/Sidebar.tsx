@@ -22,7 +22,6 @@ export function Sidebar() {
   const router = useRouter();
   const pathname = usePathname();
   const [searchQuery, setSearchQuery] = useState("");
-  const { setSearchQuery: setGlobalSearchQuery } = useOnboardingStore();
   const { general, customization } = useSettingsStore();
   const [isOpen, setIsOpen] = useState(false);
 
@@ -35,7 +34,6 @@ export function Sidebar() {
 
   const handleSearch = (query: string) => {
     setSearchQuery(query);
-    setGlobalSearchQuery(query);
   };
 
   return (
@@ -68,7 +66,7 @@ export function Sidebar() {
             onClick={() => router.push('/dashboard')}
             className="flex items-center gap-2.5 mb-2 hover:opacity-80 transition-opacity cursor-pointer w-full text-left"
           >
-            <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden">
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden">
               {customization.logoUrl ? (
                 <img 
                   src={customization.logoUrl} 

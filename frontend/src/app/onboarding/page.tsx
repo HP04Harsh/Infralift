@@ -77,7 +77,7 @@ export default function OnboardingPage() {
       setShowConnectionAnimation(false);
       setAnimationCompleted(false);
       // Reset resource sync when leaving step 3
-      updateResourceSync({ status: "pending", progress: 0, syncedResources: 0, totalResources: 150 });
+      updateResourceSync({ status: "syncing" });
     }
   }, [currentStep, animationCompleted, updateResourceSync]);
 
@@ -118,7 +118,6 @@ export default function OnboardingPage() {
       toast({
         title: "Complete all steps",
         description: "Please complete and verify all commands before proceeding",
-        variant: "destructive",
       });
     }
   };
@@ -128,7 +127,6 @@ export default function OnboardingPage() {
       toast({
         title: "Missing information",
         description: "Please provide both Tenant ID and Subscription ID",
-        variant: "destructive",
       });
       return;
     }
@@ -156,7 +154,7 @@ export default function OnboardingPage() {
   const handleConnectionAnimationComplete = () => {
     setShowConnectionAnimation(false);
     setAnimationCompleted(true);
-    updateResourceSync({ status: "completed", progress: 100, syncedResources: 150, totalResources: 150 });
+    updateResourceSync({ status: "completed" });
     toast({
       title: "Sync completed",
       description: "All resources have been synced successfully",
@@ -225,7 +223,7 @@ export default function OnboardingPage() {
                   <CardTitle className="text-base font-semibold text-gray-900 dark:text-white">Sync Resources</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-5">
-                  {resourceSync.status === "pending" && (
+                  {resourceSync.status === "idle" && (
                     <div className="text-center py-10">
                       <p className="text-gray-600 dark:text-slate-400 mb-5 text-sm">
                         Click the button below to start syncing your Azure resources
@@ -250,14 +248,11 @@ export default function OnboardingPage() {
                         <RefreshCw className="h-3.5 w-3.5 animate-spin text-azure-500" />
                       </div>
                       <div className="bg-gray-100 dark:bg-slate-900 rounded-full h-1.5 overflow-hidden">
-                        <div
-                          className="bg-azure-500 h-full transition-all duration-500"
-                          style={{ width: `${resourceSync.progress}%` }}
-                        />
+                        <div className="bg-azure-500 h-full transition-all duration-500 w-3/4" />
                       </div>
                       <div className="flex items-center justify-between text-xs">
-                        <span className="text-gray-600 dark:text-slate-400">{resourceSync.syncedResources} / {resourceSync.totalResources} resources</span>
-                        <span className="font-medium text-gray-900 dark:text-white">{Math.round(resourceSync.progress)}%</span>
+                        <span className="text-gray-600 dark:text-slate-400">Syncing Azure resources</span>
+                        <span className="font-medium text-gray-900 dark:text-white">In progress...</span>
                       </div>
                     </div>
                   )}
@@ -269,7 +264,7 @@ export default function OnboardingPage() {
                         Sync Completed
                       </h3>
                       <p className="text-gray-600 dark:text-slate-400 mb-5 text-sm">
-                        Successfully synced {resourceSync.totalResources} resources from Azure
+                        Successfully synced all resources from Azure
                       </p>
                       <Button onClick={handleCompleteSync} className="h-9 text-xs">
                         Complete
@@ -333,7 +328,7 @@ export default function OnboardingPage() {
       <Sidebar />
       
       <div className="flex-1 lg:ml-[240px] transition-all">
-        <Header title="Connect Your Azure Tenant" userName="Harsh Pardhi" />
+        <Header userName="Harsh Pardhi" />
         
         <main className="flex flex-col lg:flex-row min-h-[calc(100vh-3.5rem)]">
           <div className="flex-1 p-4 lg:p-5 max-w-[calc(100%-280px)]">

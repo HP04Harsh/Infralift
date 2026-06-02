@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react";
 import { User, Bell } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { useUptimeStore } from "@/store/uptimeStore";
 import { useNotificationStore } from "@/store/notificationStore";
 import { useSettingsStore } from "@/store/settingsStore";
@@ -94,7 +93,7 @@ export function Header({ userName = "Harsh Pardhi", showLiveIndicator = true }: 
         )}
       </div>
 
-      {/* Right side - Notification, theme toggle, user profile */}
+      {/* Right side - Notification, user profile */}
       <div className="flex items-center gap-3">
         <button 
           onClick={() => setShowNotifications(true)}
@@ -105,7 +104,6 @@ export function Header({ userName = "Harsh Pardhi", showLiveIndicator = true }: 
             <span className="absolute top-1 right-1 w-2 h-2 bg-azure-500 rounded-full animate-pulse" />
           )}
         </button>
-        <ThemeToggle />
         <button 
           onClick={() => setShowProfile(true)}
           className="flex items-center gap-2 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-lg px-2 py-1 transition-colors"

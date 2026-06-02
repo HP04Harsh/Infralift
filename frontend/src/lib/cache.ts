@@ -40,7 +40,7 @@ class CacheManager {
   }
 
   clearPattern(pattern: RegExp): void {
-    for (const key of this.cache.keys()) {
+    for (const key of Array.from(this.cache.keys())) {
       if (pattern.test(key)) {
         this.cache.delete(key);
       }
