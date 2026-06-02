@@ -36,20 +36,20 @@ export function SetupCard({
 
   const handleCopy = async () => {
     const success = await copyToClipboard(command);
+    setCopied(true);
+    onCopy();
     if (success) {
-      setCopied(true);
-      onCopy();
       toast({
         title: "Command copied to clipboard",
         description: "You can now paste it in your terminal",
       });
-      setTimeout(() => setCopied(false), 2000);
     } else {
       toast({
-        title: "Failed to copy",
-        description: "Please copy the command manually",
+        title: "Copy manually",
+        description: "Select the command and press Ctrl+C (clipboard API unavailable over HTTP)",
       });
     }
+    setTimeout(() => setCopied(false), 2000);
   };
 
   const handleVerify = async () => {

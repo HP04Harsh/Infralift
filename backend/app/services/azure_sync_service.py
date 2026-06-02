@@ -3,6 +3,7 @@ Azure Resource Sync Service
 Handles real-time sync of Azure resources and metrics
 """
 
+from typing import Optional, Dict, Any
 from azure.identity import ClientSecretCredential
 from azure.mgmt.resource import ResourceManagementClient
 from azure.mgmt.compute import ComputeManagementClient
