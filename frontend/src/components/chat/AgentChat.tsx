@@ -23,12 +23,25 @@ interface AgentChatProps {
   initialPrompt?: string;
 }
 
+const agentResponses: Record<string, (prompt: string) => string> = {
+  provisioning: (p) => `I'll help you provision the requested resources. Based on your request "${p}", I recommend starting with a standard VM series in the East US region. Would you like me to proceed with the default configuration?`,
+  assessment: (p) => `Let me analyze your Azure environment for "${p}". Currently scanning 156 resources across 12 resource groups. I'll provide a comprehensive assessment report with cost optimization and security recommendations.`,
+  migration: (p) => `For your migration request "${p}", I've identified the workloads that need to be migrated. The assessment shows 3 VMs, 2 databases, and 5 storage accounts are ready for migration. Recommended approach: lift-and-shift with minimal refactoring.`,
+  observability: (p) => `Analyzing your observability data for "${p}". Current metrics show 99.8% uptime across all services, average response time of 45ms, and 0.3% error rate. No anomalies detected in the last 24 hours.`,
+  optimization: (p) => `Optimizing your infrastructure based on "${p}". I've identified potential cost savings of 23% by right-sizing 8 VMs and 15% by moving 3 storage accounts to cooler tiers. Would you like a detailed breakdown?`,
+  troubleshoot: (p) => `Troubleshooting "${p}". Analyzing recent logs and metrics... I've found 2 related incidents in the last hour. The most likely cause is a configuration drift in the network security group. Let me suggest a fix.`,
+  itsm: (p) => `Creating an ITSM ticket for "${p}". I've categorized this as a service request with medium priority. The estimated resolution time is 4 hours. Would you like me to escalate if not resolved within the SLA window?`,
+  compliance: (p) => `Running compliance scan for "${p}". Checking against Azure Policy and industry standards (SOC 2, ISO 27001). Found 3 non-compliant resources: 2 storage accounts without encryption and 1 VM without backup configured.`,
+  dashboard: (p) => `Here's your dashboard overview for "${p}". All systems operational. Key metrics: 156 resources managed, 99.9% uptime, 0.3% error rate, 24 active alerts. Ready to help with any specific queries.`,
+};
+
 export function AgentChat({ agentName, agentType, initialPrompt = "" }: AgentChatProps) {
   const router = useRouter();
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState(initialPrompt);
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const initialPromptSent = useRef(false);
 
   // Load chat history from localStorage (simulating Redis persistence)
   useEffect(() => {
@@ -54,9 +67,10 @@ export function AgentChat({ agentName, agentType, initialPrompt = "" }: AgentCha
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Handle initial prompt
+  // Handle initial prompt (only once, prevents double-send in Strict Mode)
   useEffect(() => {
-    if (initialPrompt && messages.length === 0) {
+    if (initialPrompt && !initialPromptSent.current) {
+      initialPromptSent.current = true;
       handleSend(initialPrompt);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -76,12 +90,15 @@ export function AgentChat({ agentName, agentType, initialPrompt = "" }: AgentCha
     setInputValue("");
     setIsLoading(true);
 
-    // Simulate AI response (replace with actual API call)
+    // Agent-specific response
+    const responder = agentResponses[agentType] || ((p: string) => `I understand you want to ${p}. Let me help you with that...`);
+    const responseContent = responder(content);
+
     setTimeout(() => {
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
-        content: `I understand you want to ${content}. Let me help you with that...`,
+        content: responseContent,
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, assistantMessage]);
