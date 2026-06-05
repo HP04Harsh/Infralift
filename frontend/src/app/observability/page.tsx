@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useMemo, useEffect } from "react";
+import { useState, useRef, useMemo, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { Header } from "@/components/layout/Header";
@@ -11,27 +11,18 @@ import {
   Download, Maximize2, Minimize2, Search, ChevronDown,
   ArrowUp, ArrowDown, ArrowUpDown, Activity, Server, Wifi,
   GripHorizontal, BarChart3, LayoutDashboard, Clock,
-  TrendingUp, CheckCircle, X
+  TrendingUp, CheckCircle, X, Shield, RefreshCw,
+  Users, Layers, Container
 } from "lucide-react";
+import { useTenantDataStore } from "@/store/tenantDataStore";
+import { useNotificationStore } from "@/store/notificationStore";
+import html2canvas from "html2canvas";
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  PieChart, Pie, Cell, LineChart, Line, CartesianGrid
+} from "recharts";
 
 /* ─────────────────────── Types ─────────────────────── */
-
-interface KpiData {
-  title: string; value: string; unit: string;
-  color: string; icon: React.ReactNode;
-  trend: string; trendUp: boolean;
-}
-
-interface ReportDataSet {
-  kpis: KpiData[];
-  cpuTrend: number[];
-  resourceDist: { label: string; value: number; color: string }[];
-  memByVm: { label: string; value: number; color: string }[];
-  networkThroughput: number[];
-  storageByTier: { label: string; used: number; total: number; color: string }[];
-  alertSeverity: { label: string; value: number; color: string }[];
-  tableRows: TableRow[];
-}
 
 interface TableRow {
   name: string; type: string; cpu: number; memory: number;
@@ -50,210 +41,230 @@ interface ResizeState {
   origW: number; origH: number;
 }
 
-/* ─────────────────────── Reports Data ─────────────────────── */
+interface OverviewKpi {
+  label: string; value: string; icon: React.ReactNode;
+  color: string; subtitle: string;
+}
 
-const reportOptions = [
-  { id: "weekly", label: "Weekly Assessment Report" },
-  { id: "monthly", label: "Monthly Assessment Report" },
-  { id: "quarterly", label: "Quarterly Assessment Report" },
-];
+/* ─────────────────────── Helpers ─────────────────────── */
 
-const reports: Record<string, ReportDataSet> = {
-  weekly: {
-    kpis: [
-      { title: "Avg CPU", value: "45", unit: "%", color: "blue", icon: <Cpu className="h-4 w-4" />, trend: "+2.3%", trendUp: true },
-      { title: "Memory Usage", value: "62", unit: "%", color: "purple", icon: <Server className="h-4 w-4" />, trend: "+1.8%", trendUp: true },
-      { title: "Network IO", value: "1.2", unit: "GB/s", color: "green", icon: <Wifi className="h-4 w-4" />, trend: "-0.5%", trendUp: false },
-      { title: "Storage Used", value: "3.4", unit: "TB", color: "amber", icon: <HardDrive className="h-4 w-4" />, trend: "+5.2%", trendUp: true },
-      { title: "Active Alerts", value: "12", unit: "", color: "red", icon: <AlertTriangle className="h-4 w-4" />, trend: "-3", trendUp: false },
-    ],
-    cpuTrend: [42, 58, 35, 71, 49, 63],
-    resourceDist: [
-      { label: "Compute", value: 45, color: "#3b82f6" },
-      { label: "Storage", value: 25, color: "#22c55e" },
-      { label: "Network", value: 18, color: "#a855f7" },
-      { label: "Database", value: 12, color: "#f59e0b" },
-    ],
-    memByVm: [
-      { label: "web-01", value: 72, color: "#8b5cf6" },
-      { label: "web-02", value: 55, color: "#8b5cf6" },
-      { label: "db-01", value: 88, color: "#8b5cf6" },
-      { label: "db-02", value: 44, color: "#8b5cf6" },
-      { label: "app-01", value: 63, color: "#8b5cf6" },
-      { label: "app-02", value: 51, color: "#8b5cf6" },
-    ],
-    networkThroughput: [30, 55, 72, 48, 85, 62, 90, 78, 45, 68, 82, 58],
-    storageByTier: [
-      { label: "Hot Tier", used: 820, total: 1000, color: "#3b82f6" },
-      { label: "Cool Tier", used: 450, total: 1000, color: "#22c55e" },
-      { label: "Archive", used: 210, total: 500, color: "#f59e0b" },
-    ],
-    alertSeverity: [
-      { label: "Critical", value: 4, color: "#ef4444" },
-      { label: "Warning", value: 7, color: "#f59e0b" },
-      { label: "Info", value: 5, color: "#3b82f6" },
-      { label: "Low", value: 3, color: "#6b7280" },
-    ],
-    tableRows: [
-      { name: "prod-web-001", type: "Virtual Machine", cpu: 78, memory: 65, status: "healthy", region: "East US" },
-      { name: "prod-db-001", type: "Azure SQL DB", cpu: 92, memory: 88, status: "warning", region: "East US" },
-      { name: "prod-app-001", type: "App Service", cpu: 45, memory: 52, status: "healthy", region: "West Europe" },
-      { name: "staging-web-01", type: "Virtual Machine", cpu: 23, memory: 34, status: "healthy", region: "Southeast Asia" },
-      { name: "prod-cache-01", type: "Redis Cache", cpu: 61, memory: 72, status: "warning", region: "East US" },
-      { name: "prod-func-01", type: "Function App", cpu: 15, memory: 28, status: "healthy", region: "West Europe" },
-      { name: "prod-storage-primary", type: "Storage Account", cpu: 0, memory: 0, status: "healthy", region: "East US" },
-      { name: "prod-cdn-endpoint", type: "CDN Profile", cpu: 0, memory: 0, status: "critical", region: "Global" },
-      { name: "prod-aks-cluster", type: "Kubernetes", cpu: 67, memory: 71, status: "healthy", region: "East US" },
-      { name: "dev-sbx-001", type: "Virtual Machine", cpu: 5, memory: 12, status: "healthy", region: "Central India" },
-    ],
-  },
-  monthly: {
-    kpis: [
-      { title: "Avg CPU", value: "52", unit: "%", color: "blue", icon: <Cpu className="h-4 w-4" />, trend: "+5.1%", trendUp: true },
-      { title: "Memory Usage", value: "71", unit: "%", color: "purple", icon: <Server className="h-4 w-4" />, trend: "+3.2%", trendUp: true },
-      { title: "Network IO", value: "1.8", unit: "GB/s", color: "green", icon: <Wifi className="h-4 w-4" />, trend: "+8.7%", trendUp: true },
-      { title: "Storage Used", value: "4.1", unit: "TB", color: "amber", icon: <HardDrive className="h-4 w-4" />, trend: "+12.4%", trendUp: true },
-      { title: "Active Alerts", value: "28", unit: "", color: "red", icon: <AlertTriangle className="h-4 w-4" />, trend: "+16", trendUp: true },
-    ],
-    cpuTrend: [55, 62, 48, 73, 58, 68],
-    resourceDist: [
-      { label: "Compute", value: 48, color: "#3b82f6" },
-      { label: "Storage", value: 22, color: "#22c55e" },
-      { label: "Network", value: 16, color: "#a855f7" },
-      { label: "Database", value: 14, color: "#f59e0b" },
-    ],
-    memByVm: [
-      { label: "web-01", value: 82, color: "#8b5cf6" },
-      { label: "web-02", value: 65, color: "#8b5cf6" },
-      { label: "db-01", value: 94, color: "#8b5cf6" },
-      { label: "db-02", value: 52, color: "#8b5cf6" },
-      { label: "app-01", value: 73, color: "#8b5cf6" },
-      { label: "app-02", value: 58, color: "#8b5cf6" },
-    ],
-    networkThroughput: [40, 62, 78, 55, 88, 70, 95, 82, 50, 72, 86, 64],
-    storageByTier: [
-      { label: "Hot Tier", used: 920, total: 1000, color: "#3b82f6" },
-      { label: "Cool Tier", used: 580, total: 1000, color: "#22c55e" },
-      { label: "Archive", used: 340, total: 500, color: "#f59e0b" },
-    ],
-    alertSeverity: [
-      { label: "Critical", value: 8, color: "#ef4444" },
-      { label: "Warning", value: 15, color: "#f59e0b" },
-      { label: "Info", value: 10, color: "#3b82f6" },
-      { label: "Low", value: 6, color: "#6b7280" },
-    ],
-    tableRows: [
-      { name: "prod-web-001", type: "Virtual Machine", cpu: 85, memory: 72, status: "warning", region: "East US" },
-      { name: "prod-db-001", type: "Azure SQL DB", cpu: 95, memory: 92, status: "critical", region: "East US" },
-      { name: "prod-app-001", type: "App Service", cpu: 52, memory: 58, status: "healthy", region: "West Europe" },
-      { name: "staging-web-01", type: "Virtual Machine", cpu: 30, memory: 42, status: "healthy", region: "Southeast Asia" },
-      { name: "prod-cache-01", type: "Redis Cache", cpu: 72, memory: 81, status: "warning", region: "East US" },
-      { name: "prod-func-01", type: "Function App", cpu: 22, memory: 35, status: "healthy", region: "West Europe" },
-      { name: "prod-storage-primary", type: "Storage Account", cpu: 0, memory: 0, status: "healthy", region: "East US" },
-      { name: "prod-cdn-endpoint", type: "CDN Profile", cpu: 0, memory: 0, status: "critical", region: "Global" },
-      { name: "prod-aks-cluster", type: "Kubernetes", cpu: 75, memory: 79, status: "warning", region: "East US" },
-      { name: "dev-sbx-001", type: "Virtual Machine", cpu: 8, memory: 15, status: "healthy", region: "Central India" },
-      { name: "prod-sql-002", type: "Azure SQL DB", cpu: 44, memory: 51, status: "healthy", region: "North Europe" },
-    ],
-  },
-  quarterly: {
-    kpis: [
-      { title: "Avg CPU", value: "38", unit: "%", color: "blue", icon: <Cpu className="h-4 w-4" />, trend: "-4.2%", trendUp: false },
-      { title: "Memory Usage", value: "55", unit: "%", color: "purple", icon: <Server className="h-4 w-4" />, trend: "-2.1%", trendUp: false },
-      { title: "Network IO", value: "0.9", unit: "GB/s", color: "green", icon: <Wifi className="h-4 w-4" />, trend: "-12.3%", trendUp: false },
-      { title: "Storage Used", value: "2.8", unit: "TB", color: "amber", icon: <HardDrive className="h-4 w-4" />, trend: "+3.1%", trendUp: true },
-      { title: "Active Alerts", value: "6", unit: "", color: "red", icon: <AlertTriangle className="h-4 w-4" />, trend: "-6", trendUp: false },
-    ],
-    cpuTrend: [35, 42, 28, 58, 38, 45],
-    resourceDist: [
-      { label: "Compute", value: 40, color: "#3b82f6" },
-      { label: "Storage", value: 30, color: "#22c55e" },
-      { label: "Network", value: 20, color: "#a855f7" },
-      { label: "Database", value: 10, color: "#f59e0b" },
-    ],
-    memByVm: [
-      { label: "web-01", value: 58, color: "#8b5cf6" },
-      { label: "web-02", value: 42, color: "#8b5cf6" },
-      { label: "db-01", value: 72, color: "#8b5cf6" },
-      { label: "db-02", value: 38, color: "#8b5cf6" },
-      { label: "app-01", value: 55, color: "#8b5cf6" },
-      { label: "app-02", value: 44, color: "#8b5cf6" },
-    ],
-    networkThroughput: [25, 45, 60, 38, 72, 52, 78, 65, 35, 58, 70, 48],
-    storageByTier: [
-      { label: "Hot Tier", used: 750, total: 1000, color: "#3b82f6" },
-      { label: "Cool Tier", used: 380, total: 1000, color: "#22c55e" },
-      { label: "Archive", used: 180, total: 500, color: "#f59e0b" },
-    ],
-    alertSeverity: [
-      { label: "Critical", value: 1, color: "#ef4444" },
-      { label: "Warning", value: 3, color: "#f59e0b" },
-      { label: "Info", value: 2, color: "#3b82f6" },
-      { label: "Low", value: 1, color: "#6b7280" },
-    ],
-    tableRows: [
-      { name: "prod-web-001", type: "Virtual Machine", cpu: 52, memory: 48, status: "healthy", region: "East US" },
-      { name: "prod-db-001", type: "Azure SQL DB", cpu: 68, memory: 72, status: "healthy", region: "East US" },
-      { name: "prod-app-001", type: "App Service", cpu: 32, memory: 40, status: "healthy", region: "West Europe" },
-      { name: "staging-web-01", type: "Virtual Machine", cpu: 15, memory: 22, status: "healthy", region: "Southeast Asia" },
-      { name: "prod-cache-01", type: "Redis Cache", cpu: 48, memory: 55, status: "healthy", region: "East US" },
-    ],
-  },
-};
+function extractFromByType(stats: any, suffix: string): number {
+  if (!stats?.by_type) return 0;
+  const key = Object.keys(stats.by_type).find((k) => k.endsWith(suffix));
+  return key ? (stats.by_type[key] as number) : 0;
+}
 
-/* ─────────────────────── Pure CSS Chart Components ─────────────────────── */
+function getVmName(resourceId: string): string {
+  const parts = resourceId.split("/");
+  return parts[parts.length - 1] || resourceId;
+}
 
-function HorizontalBarChart({ data, maxValue, color }: { data: number[]; maxValue: number; color: string }) {
-  const labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+function computeAvgFromTimeseries(timeseries: any[] | undefined, field = "average"): number | null {
+  if (!timeseries || timeseries.length === 0) return null;
+  const vals = timeseries.map((t) => t[field]).filter((v) => v != null);
+  if (vals.length === 0) return null;
+  return vals.reduce((s, v) => s + v, 0) / vals.length;
+}
+
+function computeResourceDist(stats: any): { label: string; value: number; color: string }[] {
+  if (!stats?.by_type) return [];
+  const byType = stats.by_type as Record<string, number>;
+  const map: Record<string, { value: number; color: string }> = {};
+
+  Object.entries(byType).forEach(([key, val]) => {
+    const v = val as number;
+    if (key.includes("virtualMachines") || key.includes("VirtualMachines")) {
+      map["VMs"] = { value: (map["VMs"]?.value ?? 0) + v, color: "#3b82f6" };
+    } else if (key.includes("storageAccounts") || key.includes("StorageAccounts")) {
+      map["Storage"] = { value: (map["Storage"]?.value ?? 0) + v, color: "#22c55e" };
+    } else if (key.includes("databases") || key.includes("Databases") || key.includes("servers")) {
+      map["Databases"] = { value: (map["Databases"]?.value ?? 0) + v, color: "#f59e0b" };
+    } else if (key.includes("Network") || key.includes("network") || key.includes("publicIP") || key.includes("virtualNetworks") || key.includes("networkInterfaces") || key.includes("loadBalancers") || key.includes("networkSecurityGroups")) {
+      map["Networking"] = { value: (map["Networking"]?.value ?? 0) + v, color: "#a855f7" };
+    } else if (key.includes("managedClusters") || key.includes("ManagedClusters") || key.includes("ContainerService")) {
+      map["AKS"] = { value: (map["AKS"]?.value ?? 0) + v, color: "#06b6d4" };
+    } else if (!key.includes("resourceGroups") && !key.includes("ResourceGroups")) {
+      map["Other"] = { value: (map["Other"]?.value ?? 0) + v, color: "#6b7280" };
+    }
+  });
+
+  return Object.entries(map).map(([label, data]) => ({ label, ...data }));
+}
+
+function computeAlertSeverity(security: any): { label: string; value: number; color: string }[] {
+  if (!security?.alerts || !Array.isArray(security.alerts)) return [];
+  const counts: Record<string, number> = {};
+  security.alerts.forEach((a: any) => {
+    const sev = a.severity?.toLowerCase() || "low";
+    if (sev === "high") counts["Critical"] = (counts["Critical"] ?? 0) + 1;
+    else if (sev === "medium") counts["Warning"] = (counts["Warning"] ?? 0) + 1;
+    else counts["Informational"] = (counts["Informational"] ?? 0) + 1;
+  });
+  const colorMap: Record<string, string> = {
+    Critical: "#ef4444", Warning: "#f59e0b", Informational: "#3b82f6",
+  };
+  return Object.entries(counts).map(([label, value]) => ({ label, value, color: colorMap[label] ?? "#6b7280" }));
+}
+
+function computeStorageTier(resources: any[]): { label: string; used: number; total: number; color: string }[] {
+  const storageAccts = resources.filter((r) => {
+    const t = (r.type || "").toLowerCase();
+    return t.includes("storageaccounts") || t.includes("storage_accounts");
+  });
+  const tiers: Record<string, { used: number; total: number }> = {
+    Hot: { used: 0, total: 0 },
+    Cool: { used: 0, total: 0 },
+    Archive: { used: 0, total: 0 },
+  };
+  storageAccts.forEach((sa) => {
+    const tier = (sa.properties?.accessTier || sa.sku?.tier || "Hot") as string;
+    const cap = sa.properties?.primaryEndpoints?.blob ? 1024 : 100;
+    if (tiers[tier]) tiers[tier].total += cap;
+    else tiers["Hot"].total += cap;
+  });
+  const total = Object.values(tiers).reduce((s, t) => s + t.total, 0);
+  if (total === 0) return [];
+  const colorMap: Record<string, string> = { Hot: "#3b82f6", Cool: "#22c55e", Archive: "#f59e0b" };
+  return Object.entries(tiers)
+    .filter(([_, v]) => v.total > 0)
+    .map(([label, v]) => ({ label: `${label} Tier`, used: v.used, total: v.total, color: colorMap[label] }));
+}
+
+function computeCpuTrend(metrics: any): { name: string; value: number }[] {
+  const vms = metrics?.virtual_machines ?? [];
+  if (vms.length === 0) return [];
+  const points: Record<number, number[]> = {};
+  vms.forEach((vm: any) => {
+    const ts = vm.metrics?.["Percentage CPU"]?.timeseries ?? [];
+    ts.forEach((t: any) => {
+      const time = new Date(t.timestamp).getTime();
+      if (!points[time]) points[time] = [];
+      if (t.average != null) points[time].push(t.average);
+    });
+  });
+  const sorted = Object.entries(points).sort(([a], [b]) => Number(a) - Number(b));
+  return sorted.map(([ts, vals]) => ({
+    name: new Date(Number(ts)).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    value: Math.round(vals.reduce((s, v) => s + v, 0) / vals.length),
+  }));
+}
+
+function computeMemByVm(metrics: any): { label: string; value: number; color: string }[] {
+  const vms = metrics?.virtual_machines ?? [];
+  if (vms.length === 0) return [];
+  return vms.slice(0, 10).map((vm: any, i: number) => {
+    const timeseries = vm.metrics?.["Available Memory"]?.timeseries ?? [];
+    const avgMem = computeAvgFromTimeseries(timeseries, "average");
+    const memBytes = avgMem ?? 0;
+    const totalMem = 8 * 1024 * 1024 * 1024;
+    const pct = totalMem > 0 ? Math.round((1 - memBytes / totalMem) * 100) : 0;
+    const name = getVmName(vm.resource_id);
+    const colors = ["#8b5cf6", "#7c3aed", "#6d28d9", "#a78bfa", "#c4b5fd", "#ddd6fe", "#8b5cf6", "#7c3aed", "#6d28d9", "#a78bfa"];
+    return { label: name, value: Math.min(100, Math.max(0, pct)), color: colors[i % colors.length] };
+  });
+}
+
+function computeNetworkThroughput(metrics: any): { name: string; In: number; Out: number }[] {
+  const vms = metrics?.virtual_machines ?? [];
+  if (vms.length === 0) return [];
+  const points: Record<number, { in: number[]; out: number[] }> = {};
+  vms.forEach((vm: any) => {
+    const inTs = vm.metrics?.["Network In"]?.timeseries ?? [];
+    const outTs = vm.metrics?.["Network Out"]?.timeseries ?? [];
+    inTs.forEach((t: any) => {
+      if (t.average == null) return;
+      const time = new Date(t.timestamp).getTime();
+      if (!points[time]) points[time] = { in: [], out: [] };
+      points[time].in.push(t.average);
+    });
+    outTs.forEach((t: any) => {
+      if (t.average == null) return;
+      const time = new Date(t.timestamp).getTime();
+      if (!points[time]) points[time] = { in: [], out: [] };
+      points[time].out.push(t.average);
+    });
+  });
+  const sorted = Object.entries(points).sort(([a], [b]) => Number(a) - Number(b));
+  return sorted.map(([ts, d]) => ({
+    name: new Date(Number(ts)).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    In: d.in.length > 0 ? Math.round(d.in.reduce((s, v) => s + v, 0) / d.in.length) : 0,
+    Out: d.out.length > 0 ? Math.round(d.out.reduce((s, v) => s + v, 0) / d.out.length) : 0,
+  }));
+}
+
+function computeTableRows(resources: any[], metrics: any): TableRow[] {
+  const vmMetrics = metrics?.virtual_machines ?? [];
+  const metricMap: Record<string, { cpu: number; mem: number }> = {};
+  vmMetrics.forEach((vm: any) => {
+    const name = getVmName(vm.resource_id);
+    const cpuTimeseries = vm.metrics?.["Percentage CPU"]?.timeseries ?? [];
+    const memTimeseries = vm.metrics?.["Available Memory"]?.timeseries ?? [];
+    const avgCpu = computeAvgFromTimeseries(cpuTimeseries, "average");
+    const avgMemBytes = computeAvgFromTimeseries(memTimeseries, "average");
+    const totalMem = 8 * 1024 * 1024 * 1024;
+    const memPct = avgMemBytes != null && totalMem > 0 ? Math.round((1 - avgMemBytes / totalMem) * 100) : 0;
+    metricMap[name] = { cpu: avgCpu ?? 0, mem: memPct };
+  });
+
+  return resources.slice(0, 50).map((r: any) => {
+    const name = r.name || "unknown";
+    const m = metricMap[name];
+    const statusRaw = (r.properties?.provisioningState || r.properties?.powerState || r.status || "Succeeded") as string;
+    let status: TableRow["status"] = "healthy";
+    if (["Failed", "Degraded", "Error", "Stopped", "Deallocated"].includes(statusRaw)) status = "critical";
+    else if (["Updating", "Moving", "Warning"].includes(statusRaw)) status = "warning";
+    return {
+      name,
+      type: (r.type || "Resource").split("/").pop() || "Resource",
+      cpu: m ? Math.round(m.cpu) : 0,
+      memory: m ? Math.round(m.mem) : 0,
+      status,
+      region: r.location || "Global",
+    };
+  });
+}
+
+/* ─────────────────────── Chart Components ─────────────────────── */
+
+function CpuTrendChart({ data }: { data: { name: string; value: number }[] }) {
+  if (data.length === 0) {
+    return <div className="flex items-center justify-center h-[150px] text-xs text-gray-400 dark:text-slate-500">No CPU Metrics Available</div>;
+  }
   return (
-    <div className="space-y-2">
-      {data.map((val, i) => (
-        <div key={i} className="flex items-center gap-2">
-          <span className="text-[11px] text-gray-500 dark:text-slate-400 w-7 text-right flex-shrink-0">{labels[i]}</span>
-          <div className="flex-1 bg-gray-100 dark:bg-slate-700/60 rounded-full h-4 overflow-hidden">
-            <motion.div
-              initial={{ width: 0 }}
-              animate={{ width: `${(val / maxValue) * 100}%` }}
-              transition={{ duration: 0.6, delay: i * 0.06, ease: "easeOut" }}
-              className="h-full rounded-full"
-              style={{ backgroundColor: color }}
-            />
-          </div>
-          <span className="text-[11px] font-medium text-gray-700 dark:text-slate-300 w-8 text-right flex-shrink-0">{val}%</span>
-        </div>
-      ))}
-    </div>
+    <ResponsiveContainer width="100%" height={150}>
+      <LineChart data={data} margin={{ top: 2, right: 2, left: -12, bottom: 0 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+        <XAxis dataKey="name" tick={{ fontSize: 8, fill: '#6b7280' }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+        <YAxis domain={[0, 100]} tick={{ fontSize: 9, fill: '#6b7280' }} axisLine={false} tickLine={false} width={22} unit="%" />
+        <Tooltip contentStyle={{ fontSize: 10, borderRadius: 6, border: '1px solid #e5e7eb', padding: '4px 8px' }} />
+        <Line type="monotone" dataKey="value" stroke="#3b82f6" strokeWidth={2} dot={{ r: 2, fill: "#3b82f6" }} activeDot={{ r: 4 }} />
+      </LineChart>
+    </ResponsiveContainer>
   );
 }
 
 function DonutChart({ data }: { data: { label: string; value: number; color: string }[] }) {
-  const total = data.reduce((s, d) => s + d.value, 0);
-  let cumulative = 0;
-  const segments = data.map((d) => {
-    const start = (cumulative / total) * 360;
-    cumulative += d.value;
-    const end = (cumulative / total) * 360;
-    return { ...d, start, end };
-  });
-  const gradient = segments.map((s) => `${s.color} ${s.start}deg ${s.end}deg`).join(", ");
-
+  if (data.length === 0) {
+    return <div className="flex items-center justify-center h-[150px] text-xs text-gray-400 dark:text-slate-500">No data</div>;
+  }
   return (
     <div className="flex items-center gap-4 h-full">
-      <div className="relative w-24 h-24 flex-shrink-0">
-        <div
-          className="w-full h-full rounded-full"
-          style={{ background: `conic-gradient(${gradient})` }}
-        />
-        <div className="absolute inset-[14px] bg-white dark:bg-slate-800 rounded-full flex items-center justify-center">
-          <span className="text-sm font-bold text-gray-900 dark:text-white">{total}</span>
-        </div>
+      <div className="w-28 h-28 flex-shrink-0">
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie data={data} cx="50%" cy="50%" innerRadius={28} outerRadius={42} paddingAngle={2} dataKey="value">
+              {data.map((entry, i) => (<Cell key={i} fill={entry.color} />))}
+            </Pie>
+            <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8, border: '1px solid #e5e7eb' }} />
+          </PieChart>
+        </ResponsiveContainer>
       </div>
       <div className="space-y-1.5 flex-1">
         {data.map((d) => (
           <div key={d.label} className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: d.color }} />
             <span className="text-[11px] text-gray-600 dark:text-slate-400">{d.label}</span>
-            <span className="text-[11px] font-medium text-gray-900 dark:text-white ml-auto">{d.value}%</span>
+            <span className="text-[11px] font-medium text-gray-900 dark:text-white ml-auto">{d.value}</span>
           </div>
         ))}
       </div>
@@ -261,130 +272,113 @@ function DonutChart({ data }: { data: { label: string; value: number; color: str
   );
 }
 
-function ColumnChart({ data }: { data: { label: string; value: number; color: string }[] }) {
-  const max = Math.max(...data.map((d) => d.value));
+function MemByVmChart({ data }: { data: { label: string; value: number; color: string }[] }) {
+  if (data.length === 0) {
+    return <div className="flex items-center justify-center h-[150px] text-xs text-gray-400 dark:text-slate-500">No Memory Metrics Available</div>;
+  }
   return (
-    <div className="flex items-end justify-around h-32 gap-1">
-      {data.map((d) => (
-        <div key={d.label} className="flex flex-col items-center gap-1 flex-1 max-w-[44px]">
-          <span className="text-[10px] font-medium text-gray-700 dark:text-slate-300">{d.value}%</span>
-          <motion.div
-            initial={{ height: 0 }}
-            animate={{ height: `${(d.value / max) * 100}%` }}
-            transition={{ duration: 0.5, ease: "easeOut" }}
-            className="w-7 rounded-t-md"
-            style={{ backgroundColor: d.color }}
-          />
-          <span className="text-[10px] text-gray-500 dark:text-slate-400 truncate w-full text-center">{d.label}</span>
-        </div>
-      ))}
-    </div>
+    <ResponsiveContainer width="100%" height={150}>
+      <BarChart data={data} margin={{ top: 2, right: 2, left: -12, bottom: 0 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+        <XAxis dataKey="label" tick={{ fontSize: 8, fill: '#6b7280' }} axisLine={false} tickLine={false} interval={0} angle={-15} textAnchor="end" height={36} />
+        <YAxis domain={[0, 100]} tick={{ fontSize: 9, fill: '#6b7280' }} axisLine={false} tickLine={false} width={22} />
+        <Tooltip contentStyle={{ fontSize: 10, borderRadius: 6, border: '1px solid #e5e7eb', padding: '4px 8px' }} />
+      </BarChart>
+    </ResponsiveContainer>
   );
 }
 
-function LineChartApprox({ data, color }: { data: number[]; color: string }) {
-  const max = Math.max(...data);
-  const min = Math.min(...data);
-  const range = max - min || 1;
-  const w = 100;
-  const h = 40;
-  const points = data.map((val, i) => ({
-    x: (i / (data.length - 1)) * w,
-    y: h - ((val - min) / range) * h,
-    val,
+function NetworkChart({ data }: { data: { name: string; In: number; Out: number }[] }) {
+  if (data.length === 0) {
+    return <div className="flex items-center justify-center h-[150px] text-xs text-gray-400 dark:text-slate-500">No Network Metrics Available</div>;
+  }
+  return (
+    <ResponsiveContainer width="100%" height={150}>
+      <LineChart data={data} margin={{ top: 2, right: 2, left: -12, bottom: 0 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+        <XAxis dataKey="name" tick={{ fontSize: 8, fill: '#6b7280' }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+        <YAxis tick={{ fontSize: 9, fill: '#6b7280' }} axisLine={false} tickLine={false} width={22} />
+        <Tooltip contentStyle={{ fontSize: 10, borderRadius: 6, border: '1px solid #e5e7eb', padding: '4px 8px' }} />
+        <Line type="monotone" dataKey="In" stroke="#22c55e" strokeWidth={2} dot={{ r: 2 }} name="In" />
+        <Line type="monotone" dataKey="Out" stroke="#3b82f6" strokeWidth={2} dot={{ r: 2 }} name="Out" />
+      </LineChart>
+    </ResponsiveContainer>
+  );
+}
+
+function StorageTierChart({ data }: { data: { label: string; used: number; total: number; color: string }[] }) {
+  if (data.length === 0) {
+    return <div className="flex items-center justify-center h-[150px] text-xs text-gray-400 dark:text-slate-500">No Storage Tier Data</div>;
+  }
+  const chartData = data.map(d => ({
+    name: d.label,
+    Used: d.total > 0 ? Math.round((d.used / d.total) * 100) : 0,
+    Remaining: d.total > 0 ? 100 - Math.round((d.used / d.total) * 100) : 100,
+    fill: d.color,
   }));
-  const pointStr = points.map((p) => `${p.x},${p.y}`).join(" ");
-
   return (
-    <div className="h-32 relative">
-      <svg className="w-full h-full" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
-        <polyline fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" points={pointStr} />
-        {points.map((p, i) => (
-          <circle key={i} cx={p.x} cy={p.y} r="1.2" fill={color} />
-        ))}
-      </svg>
-      <div className="flex justify-between mt-1">
-        <span className="text-[10px] text-gray-500 dark:text-slate-400">0s</span>
-        <span className="text-[10px] text-gray-500 dark:text-slate-400">{max}%</span>
-      </div>
-    </div>
-  );
-}
-
-function StackedBarChart({ data }: { data: { label: string; used: number; total: number; color: string }[] }) {
-  return (
-    <div className="space-y-3">
-      {data.map((tier) => (
-        <div key={tier.label}>
-          <div className="flex justify-between text-[11px] mb-1">
-            <span className="text-gray-600 dark:text-slate-400">{tier.label}</span>
-            <span className="font-medium text-gray-900 dark:text-white">
-              {tier.used} / {tier.total} GB
-            </span>
-          </div>
-          <div className="w-full bg-gray-100 dark:bg-slate-700/60 rounded-full h-3 overflow-hidden">
-            <motion.div
-              initial={{ width: 0 }}
-              animate={{ width: `${(tier.used / tier.total) * 100}%` }}
-              transition={{ duration: 0.6, ease: "easeOut" }}
-              className="h-full rounded-full"
-              style={{ backgroundColor: tier.color }}
-            />
-          </div>
-        </div>
-      ))}
-    </div>
+    <ResponsiveContainer width="100%" height={150}>
+      <BarChart data={chartData} margin={{ top: 2, right: 2, left: -12, bottom: 0 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+        <XAxis dataKey="name" tick={{ fontSize: 9, fill: '#6b7280' }} axisLine={false} tickLine={false} />
+        <YAxis domain={[0, 100]} tick={{ fontSize: 9, fill: '#6b7280' }} axisLine={false} tickLine={false} width={22} unit="%" />
+        <Tooltip contentStyle={{ fontSize: 10, borderRadius: 6, border: '1px solid #e5e7eb', padding: '4px 8px' }} />
+        <Bar dataKey="Used" stackId="a" radius={[2, 2, 0, 0]} maxBarSize={32}>
+          {data.map((entry, i) => (<Cell key={i} fill={entry.color} />))}
+        </Bar>
+        <Bar dataKey="Remaining" stackId="a" fill="#e5e7eb" radius={[2, 2, 0, 0]} maxBarSize={32} />
+      </BarChart>
+    </ResponsiveContainer>
   );
 }
 
 function AlertSeverityChart({ data }: { data: { label: string; value: number; color: string }[] }) {
-  const max = Math.max(...data.map((d) => d.value));
+  if (data.length === 0) {
+    return <div className="flex items-center justify-center h-[150px] text-xs text-gray-400 dark:text-slate-500">No Alerts</div>;
+  }
   return (
-    <div className="flex items-end justify-around h-32">
-      {data.map((d) => (
-        <div key={d.label} className="flex flex-col items-center gap-1 flex-1 max-w-[52px]">
-          <span className="text-[10px] font-medium text-gray-700 dark:text-slate-300">{d.value}</span>
-          <motion.div
-            initial={{ height: 0 }}
-            animate={{ height: `${(d.value / max) * 100}%` }}
-            transition={{ duration: 0.5, ease: "easeOut" }}
-            className="w-8 rounded-t-md"
-            style={{ backgroundColor: d.color }}
-          />
-          <span className="text-[10px] text-gray-500 dark:text-slate-400">{d.label}</span>
-        </div>
-      ))}
-    </div>
+    <ResponsiveContainer width="100%" height={150}>
+      <BarChart data={data} margin={{ top: 2, right: 2, left: -12, bottom: 0 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+        <XAxis dataKey="label" tick={{ fontSize: 9, fill: '#6b7280' }} axisLine={false} tickLine={false} />
+        <YAxis tick={{ fontSize: 9, fill: '#6b7280' }} axisLine={false} tickLine={false} width={22} allowDecimals={false} />
+        <Tooltip contentStyle={{ fontSize: 10, borderRadius: 6, border: '1px solid #e5e7eb', padding: '4px 8px' }} />
+        <Bar dataKey="value" radius={[2, 2, 0, 0]} maxBarSize={28}>
+          {data.map((entry, i) => (<Cell key={i} fill={entry.color} />))}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
   );
 }
 
-/* ─────────────────────── Chart Config ─────────────────────── */
+/* ─────────────────────── Chart Configs ─────────────────────── */
 
-interface ChartConfig {
-  id: string;
-  title: string;
-  icon: React.ReactNode;
-  chart: (data: ReportDataSet) => React.ReactNode;
+interface ChartContext {
+  cpuTrend: { name: string; value: number }[];
+  resourceDist: { label: string; value: number; color: string }[];
+  memByVm: { label: string; value: number; color: string }[];
+  networkData: { name: string; In: number; Out: number }[];
+  storageTier: { label: string; used: number; total: number; color: string }[];
+  alertData: { label: string; value: number; color: string }[];
 }
 
-const chartConfigs: ChartConfig[] = [
-  { id: "cpu-trend", title: "CPU Usage Trend", icon: <Cpu className="h-3.5 w-3.5" />, chart: (d) => <HorizontalBarChart data={d.cpuTrend} maxValue={100} color="#3b82f6" /> },
-  { id: "resource-dist", title: "Resource Distribution", icon: <Activity className="h-3.5 w-3.5" />, chart: (d) => <DonutChart data={d.resourceDist} /> },
-  { id: "mem-by-vm", title: "Memory Usage by VM", icon: <Server className="h-3.5 w-3.5" />, chart: (d) => <ColumnChart data={d.memByVm} /> },
-  { id: "network-throughput", title: "Network Throughput", icon: <Wifi className="h-3.5 w-3.5" />, chart: (d) => <LineChartApprox data={d.networkThroughput} color="#22c55e" /> },
-  { id: "storage-by-tier", title: "Storage by Tier", icon: <HardDrive className="h-3.5 w-3.5" />, chart: (d) => <StackedBarChart data={d.storageByTier} /> },
-  { id: "alert-severity", title: "Alert Severity", icon: <AlertTriangle className="h-3.5 w-3.5" />, chart: (d) => <AlertSeverityChart data={d.alertSeverity} /> },
+const chartConfigs: { id: string; title: string; icon: React.ReactNode; render: (ctx: ChartContext) => React.ReactNode }[] = [
+  { id: "cpu-trend", title: "CPU Usage Trend", icon: <Cpu className="h-3.5 w-3.5" />, render: (ctx) => <CpuTrendChart data={ctx.cpuTrend} /> },
+  { id: "resource-dist", title: "Resource Distribution", icon: <Activity className="h-3.5 w-3.5" />, render: (ctx) => <DonutChart data={ctx.resourceDist} /> },
+  { id: "mem-by-vm", title: "Memory Usage by VM", icon: <Server className="h-3.5 w-3.5" />, render: (ctx) => <MemByVmChart data={ctx.memByVm} /> },
+  { id: "network-throughput", title: "Network Throughput", icon: <Wifi className="h-3.5 w-3.5" />, render: (ctx) => <NetworkChart data={ctx.networkData} /> },
+  { id: "storage-by-tier", title: "Storage by Tier", icon: <HardDrive className="h-3.5 w-3.5" />, render: (ctx) => <StorageTierChart data={ctx.storageTier} /> },
+  { id: "alert-severity", title: "Alert Severity", icon: <AlertTriangle className="h-3.5 w-3.5" />, render: (ctx) => <AlertSeverityChart data={ctx.alertData} /> },
 ];
 
-/* ─────────────────────── Draggable/Resizable Chart Card ─────────────────────── */
+/* ─────────────────────── Chart Card ─────────────────────── */
 
 function ChartCard({
-  id, title, icon, reportData, minimized, onToggleMinimize,
-  position, onDragStart,
-  size, onResizeStart,
+  id, title, icon, chartContext, minimized, onToggleMinimize,
+  position, onDragStart, size, onResizeStart,
 }: {
   id: string; title: string; icon: React.ReactNode;
-  reportData: ReportDataSet;
+  chartContext: ChartContext;
   minimized: boolean; onToggleMinimize: () => void;
   position: { x: number; y: number };
   onDragStart: (e: React.MouseEvent, chartId: string) => void;
@@ -418,7 +412,6 @@ function ChartCard({
           {minimized ? <Maximize2 className="h-3 w-3" /> : <Minimize2 className="h-3 w-3" />}
         </button>
       </div>
-
       <AnimatePresence>
         {!minimized && (
           <motion.div
@@ -428,11 +421,10 @@ function ChartCard({
             transition={{ duration: 0.2 }}
             className="overflow-hidden"
           >
-            <div className="p-3">{cfg.chart(reportData)}</div>
+            <div className="p-3">{cfg.render(chartContext)}</div>
           </motion.div>
         )}
       </AnimatePresence>
-
       <div
         className="absolute bottom-0 right-0 w-3 h-3 cursor-se-resize opacity-0 group-hover:opacity-100 transition-opacity"
         onMouseDown={(e) => { e.stopPropagation(); onResizeStart(e, id); }}
@@ -447,14 +439,14 @@ function ChartCard({
   );
 }
 
-/* ─────────────────────── KPI Card ─────────────────────── */
+/* ─────────────────────── Overview KPI Card ─────────────────────── */
 
-function KpiCard({ data, index }: { data: KpiData; index: number }) {
+function OverviewKpiCard({ data, index }: { data: OverviewKpi; index: number }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, delay: index * 0.05 }}
+      transition={{ duration: 0.3, delay: index * 0.03 }}
       className={cn(
         "p-4 border border-gray-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800",
         "hover:shadow-md hover:border-azure-200 dark:hover:border-azure-800 transition-all"
@@ -468,20 +460,15 @@ function KpiCard({ data, index }: { data: KpiData; index: number }) {
           data.color === "green" && "bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400",
           data.color === "amber" && "bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400",
           data.color === "red" && "bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400",
+          data.color === "cyan" && "bg-cyan-100 dark:bg-cyan-900/30 text-cyan-600 dark:text-cyan-400",
+          data.color === "gray" && "bg-gray-100 dark:bg-slate-700/50 text-gray-600 dark:text-slate-400",
         )}>
           {data.icon}
         </div>
-        <span className="text-xs text-gray-500 dark:text-slate-400">{data.title}</span>
+        <span className="text-xs text-gray-500 dark:text-slate-400">{data.label}</span>
       </div>
-      <p className="text-2xl font-bold text-gray-900 dark:text-white mb-1">
-        {data.value}{data.unit && <span className="text-sm font-normal text-gray-400 dark:text-slate-500 ml-0.5">{data.unit}</span>}
-      </p>
-      <p className={cn(
-        "text-xs font-medium",
-        data.trendUp ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"
-      )}>
-        {data.trendUp ? "\u2191" : "\u2193"} {data.trend}
-      </p>
+      <p className="text-2xl font-bold text-gray-900 dark:text-white">{data.value}</p>
+      <p className="text-[10px] text-gray-400 dark:text-slate-500 mt-0.5">{data.subtitle}</p>
     </motion.div>
   );
 }
@@ -497,18 +484,16 @@ const statusColor: Record<string, string> = {
   critical: "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800",
 };
 
+const EXPORT_CSV_COLUMNS = ["Resource Name", "Type", "CPU %", "Memory %", "Status", "Region"];
+
 function DataTable({ rows }: { rows: TableRow[] }) {
   const [sortField, setSortField] = useState<SortField>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [search, setSearch] = useState("");
 
   const handleSort = (field: SortField) => {
-    if (sortField === field) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortField(field);
-      setSortDir("asc");
-    }
+    if (sortField === field) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortField(field); setSortDir("asc"); }
   };
 
   const filtered = useMemo(() => {
@@ -518,12 +503,10 @@ function DataTable({ rows }: { rows: TableRow[] }) {
       data = data.filter((r) => r.name.toLowerCase().includes(q) || r.type.toLowerCase().includes(q) || r.region.toLowerCase().includes(q));
     }
     data.sort((a, b) => {
-      const aVal = a[sortField];
-      const bVal = b[sortField];
-      if (typeof aVal === "string" && typeof bVal === "string") {
-        return sortDir === "asc" ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
-      }
-      return sortDir === "asc" ? (aVal as number) - (bVal as number) : (bVal as number) - (aVal as number);
+      const aVal = a[sortField] as any;
+      const bVal = b[sortField] as any;
+      if (typeof aVal === "string" && typeof bVal === "string") return sortDir === "asc" ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+      return sortDir === "asc" ? aVal - bVal : bVal - aVal;
     });
     return data;
   }, [rows, sortField, sortDir, search]);
@@ -538,10 +521,7 @@ function DataTable({ rows }: { rows: TableRow[] }) {
       className={cn("px-3 py-2.5 text-[11px] font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider cursor-pointer hover:text-gray-700 dark:hover:text-slate-200 select-none", className)}
       onClick={() => handleSort(field)}
     >
-      <div className="flex items-center gap-1">
-        {label}
-        <SortIcon field={field} />
-      </div>
+      <div className="flex items-center gap-1">{label}<SortIcon field={field} /></div>
     </th>
   );
 
@@ -564,7 +544,6 @@ function DataTable({ rows }: { rows: TableRow[] }) {
           />
         </div>
       </div>
-
       <div className="overflow-x-auto">
         <table className="w-full text-left">
           <thead>
@@ -590,10 +569,7 @@ function DataTable({ rows }: { rows: TableRow[] }) {
                 <td className="px-3 py-2.5 text-xs text-gray-700 dark:text-slate-300 whitespace-nowrap">
                   <div className="flex items-center gap-2">
                     <div className="w-12 bg-gray-200 dark:bg-slate-700 rounded-full h-1.5">
-                      <div
-                        className="h-full rounded-full"
-                        style={{ width: `${row.cpu}%`, backgroundColor: row.cpu > 80 ? "#ef4444" : row.cpu > 50 ? "#f59e0b" : "#22c55e" }}
-                      />
+                      <div className="h-full rounded-full" style={{ width: `${row.cpu}%`, backgroundColor: row.cpu > 80 ? "#ef4444" : row.cpu > 50 ? "#f59e0b" : "#22c55e" }} />
                     </div>
                     {row.cpu}%
                   </div>
@@ -601,27 +577,20 @@ function DataTable({ rows }: { rows: TableRow[] }) {
                 <td className="px-3 py-2.5 text-xs text-gray-700 dark:text-slate-300 whitespace-nowrap">
                   <div className="flex items-center gap-2">
                     <div className="w-12 bg-gray-200 dark:bg-slate-700 rounded-full h-1.5">
-                      <div
-                        className="h-full rounded-full"
-                        style={{ width: `${row.memory}%`, backgroundColor: row.memory > 80 ? "#ef4444" : row.memory > 50 ? "#f59e0b" : "#22c55e" }}
-                      />
+                      <div className="h-full rounded-full" style={{ width: `${row.memory}%`, backgroundColor: row.memory > 80 ? "#ef4444" : row.memory > 50 ? "#f59e0b" : "#22c55e" }} />
                     </div>
                     {row.memory}%
                   </div>
                 </td>
                 <td className="px-3 py-2.5 whitespace-nowrap">
-                  <span className={cn("text-[10px] px-2 py-0.5 rounded-full border font-medium", statusColor[row.status])}>
-                    {row.status}
-                  </span>
+                  <span className={cn("text-[10px] px-2 py-0.5 rounded-full border font-medium", statusColor[row.status])}>{row.status}</span>
                 </td>
                 <td className="px-3 py-2.5 text-xs text-gray-600 dark:text-slate-400 whitespace-nowrap">{row.region}</td>
               </motion.tr>
             ))}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-3 py-8 text-center text-xs text-gray-400 dark:text-slate-500">
-                  No resources match your filter.
-                </td>
+                <td colSpan={6} className="px-3 py-8 text-center text-xs text-gray-400 dark:text-slate-500">No resources match your filter.</td>
               </tr>
             )}
           </tbody>
@@ -634,21 +603,61 @@ function DataTable({ rows }: { rows: TableRow[] }) {
 /* ─────────────────────── Main Page ─────────────────────── */
 
 export default function ObservabilityDashboardPage() {
-  const [selectedReport, setSelectedReport] = useState("weekly");
-  const [reportDropdownOpen, setReportDropdownOpen] = useState(false);
-  const [exportOpen, setExportOpen] = useState(false);
+  const { stats, costs, security, metrics, advisor, resources, loading, syncing, error, fetchAll, resync } = useTenantDataStore();
+  const addNotification = useNotificationStore((s) => s.addNotification);
 
-  const data = reports[selectedReport];
+  useEffect(() => {
+    if (loading) fetchAll();
+  }, []);
 
+  /* ── Overview KPIs ── */
+  const overviewKpis = useMemo((): OverviewKpi[] => {
+    const byType = stats?.by_type ?? {};
+    const resourceSummary = stats?.resource_summary;
+    const totalResources = stats?.total_resources ?? Object.values(byType).reduce((s: number, v) => s + (v as number), 0);
+    const rgs = extractFromByType(stats, "resourceGroups");
+    const vms = extractFromByType(stats, "virtualMachines");
+    const storage = extractFromByType(stats, "storageAccounts");
+    const dbs = resourceSummary?.sql_databases ?? extractFromByType(stats, "databases") ?? 0;
+    const aks = extractFromByType(stats, "managedClusters");
+    const advisorCount = advisor?.count ?? advisor?.recommendations?.length ?? 0;
+    const secureScore = security?.secure_score_percentage != null ? `${Math.round(security.secure_score_percentage)}%` : "N/A";
+    const subscriptionCount = Object.keys(stats?.by_location ?? {}).length > 0 ? "1" : "N/A";
+
+    return [
+      { label: "Total Resources", value: `${totalResources}`, icon: <Database className="h-4 w-4" />, color: "blue", subtitle: stats ? `Last sync: ${stats.synced_at ? new Date(stats.synced_at).toLocaleTimeString() : ""}` : "" },
+      { label: "Resource Groups", value: `${rgs}`, icon: <Layers className="h-4 w-4" />, color: "green", subtitle: "Across all subscriptions" },
+      { label: "Virtual Machines", value: `${vms}`, icon: <Cpu className="h-4 w-4" />, color: "purple", subtitle: metrics?.virtual_machines?.length ? `${metrics.virtual_machines.length} with metrics` : "" },
+      { label: "Storage Accounts", value: `${storage}`, icon: <HardDrive className="h-4 w-4" />, color: "amber", subtitle: "Azure Blob & File Storage" },
+      { label: "Databases", value: `${dbs}`, icon: <Database className="h-4 w-4" />, color: "red", subtitle: "SQL & Cosmos DB" },
+      { label: "AKS Clusters", value: `${aks}`, icon: <Container className="h-4 w-4" />, color: "cyan", subtitle: "Managed Kubernetes" },
+      { label: "Azure Advisor", value: `${advisorCount}`, icon: <Shield className="h-4 w-4" />, color: "gray", subtitle: `${advisorCount > 0 ? "Recommendations available" : "No recommendations"}` },
+      { label: "Secure Score", value: `${secureScore}`, icon: <CheckCircle className="h-4 w-4" />, color: "green", subtitle: "Microsoft Defender for Cloud" },
+      { label: "Subscriptions", value: subscriptionCount, icon: <Globe className="h-4 w-4" />, color: "blue", subtitle: "Active Azure subscriptions" },
+      { label: "Azure Users", value: "N/A", icon: <Users className="h-4 w-4" />, color: "gray", subtitle: "Requires Graph API access" },
+    ];
+  }, [stats, security, advisor, metrics]);
+
+  /* ── Chart data ── */
+  const chartContext = useMemo((): ChartContext => ({
+    cpuTrend: computeCpuTrend(metrics),
+    resourceDist: computeResourceDist(stats),
+    memByVm: computeMemByVm(metrics),
+    networkData: computeNetworkThroughput(metrics),
+    storageTier: computeStorageTier(resources),
+    alertData: computeAlertSeverity(security),
+  }), [stats, metrics, security, resources]);
+
+  const tableRows = useMemo(() => computeTableRows(resources, metrics), [resources, metrics]);
+
+  /* ── Draggable / Resizable state ── */
   const [minimized, setMinimized] = useState<Record<string, boolean>>({});
   const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>({});
   const [sizes, setSizes] = useState<Record<string, { w: number; h: number }>>({});
-
   const gridRef = useRef<HTMLDivElement>(null);
-
+  const dashboardRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState>({ chartId: null, startX: 0, startY: 0, origX: 0, origY: 0 });
   const resizeRef = useRef<ResizeState>({ chartId: null, startX: 0, startY: 0, origW: 0, origH: 0 });
-
   const GRID_GAP = 16;
   const CHART_W = 300;
   const CHART_H = 250;
@@ -676,10 +685,7 @@ export default function ObservabilityDashboardPage() {
         const dy = e.clientY - dragRef.current.startY;
         setPositions((prev) => ({
           ...prev,
-          [dragRef.current.chartId!]: {
-            x: Math.max(0, dragRef.current.origX + dx),
-            y: Math.max(0, dragRef.current.origY + dy),
-          },
+          [dragRef.current.chartId!]: { x: Math.max(0, dragRef.current.origX + dx), y: Math.max(0, dragRef.current.origY + dy) },
         }));
       }
       if (resizeRef.current.chartId) {
@@ -687,120 +693,98 @@ export default function ObservabilityDashboardPage() {
         const dy = e.clientY - resizeRef.current.startY;
         setSizes((prev) => ({
           ...prev,
-          [resizeRef.current.chartId!]: {
-            w: Math.max(MIN_W, resizeRef.current.origW + dx),
-            h: Math.max(MIN_H, resizeRef.current.origH + dy),
-          },
+          [resizeRef.current.chartId!]: { w: Math.max(MIN_W, resizeRef.current.origW + dx), h: Math.max(MIN_H, resizeRef.current.origH + dy) },
         }));
       }
     };
-    const handleMouseUp = () => {
-      dragRef.current.chartId = null;
-      resizeRef.current.chartId = null;
-    };
+    const handleMouseUp = () => { dragRef.current.chartId = null; resizeRef.current.chartId = null; };
     document.addEventListener("mousemove", handleMouseMove);
     document.addEventListener("mouseup", handleMouseUp);
-    return () => {
-      document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", handleMouseUp);
-    };
+    return () => { document.removeEventListener("mousemove", handleMouseMove); document.removeEventListener("mouseup", handleMouseUp); };
   }, []);
 
   const handleDragStart = (e: React.MouseEvent, chartId: string) => {
-    dragRef.current = {
-      chartId,
-      startX: e.clientX,
-      startY: e.clientY,
-      origX: positions[chartId]?.x ?? 0,
-      origY: positions[chartId]?.y ?? 0,
-    };
+    dragRef.current = { chartId, startX: e.clientX, startY: e.clientY, origX: positions[chartId]?.x ?? 0, origY: positions[chartId]?.y ?? 0 };
   };
-
   const handleResizeStart = (e: React.MouseEvent, chartId: string) => {
-    resizeRef.current = {
-      chartId,
-      startX: e.clientX,
-      startY: e.clientY,
-      origW: sizes[chartId]?.w ?? CHART_W,
-      origH: sizes[chartId]?.h ?? CHART_H,
-    };
+    resizeRef.current = { chartId, startX: e.clientX, startY: e.clientY, origW: sizes[chartId]?.w ?? CHART_W, origH: sizes[chartId]?.h ?? CHART_H };
+  };
+  const toggleMinimized = (id: string) => setMinimized((prev) => ({ ...prev, [id]: !prev[id] }));
+
+  const handleResync = useCallback(async () => {
+    addNotification({ title: "Resyncing...", message: "Refreshing Azure Monitor, Log Analytics, Resource Graph, Advisor & Defender data", status: "info", category: "tenant_sync" });
+    await resync();
+    addNotification({ title: "Resync complete", message: "All observability data refreshed", status: "success", category: "tenant_sync" });
+  }, [resync, addNotification]);
+
+  const handleExport = async (format: string) => {
+    if (format === "CSV") {
+      const header = EXPORT_CSV_COLUMNS.join(",");
+      const tableRowsStr = tableRows.map(r => `${r.name},${r.type},${r.cpu},${r.memory},${r.status},${r.region}`);
+      const csv = [`Observability Export — ${new Date().toLocaleString()}`, header, ...tableRowsStr].join("\n");
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `observability_${Date.now()}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      return;
+    }
+    const el = dashboardRef.current;
+    if (!el) return;
+    const canvas = await html2canvas(el, { backgroundColor: "#ffffff", scale: 2, useCORS: true, logging: false });
+    if (format === "PNG") {
+      const link = document.createElement("a");
+      link.download = `observability_${Date.now()}.png`;
+      link.href = canvas.toDataURL("image/png");
+      link.click();
+    } else if (format === "PDF") {
+      const imgData = canvas.toDataURL("image/png");
+      const printWin = window.open("", "_blank");
+      if (printWin) {
+        printWin.document.write(`<html><head><title>Observability</title><style>body{margin:0;display:flex;justify-content:center}img{max-width:100%;height:auto}</style></head><body><img src="${imgData}" onload="window.print();window.close()" /></body></html>`);
+        printWin.document.close();
+      }
+    }
   };
 
-  const toggleMinimized = (id: string) => {
-    setMinimized((prev) => ({ ...prev, [id]: !prev[id] }));
-  };
-
-  const currentReportLabel = reportOptions.find((r) => r.id === selectedReport)?.label ?? "Select Report";
-
-  const handleExport = (format: string) => {
-    setExportOpen(false);
-    alert(`Exporting dashboard as ${format}`);
-  };
-
+  const [exportOpen, setExportOpen] = useState(false);
   const gridHeight = Math.ceil(chartConfigs.length / 3) * (CHART_H + GRID_GAP) - GRID_GAP;
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-slate-950 flex">
       <Sidebar />
-
       <div className="flex-1 lg:ml-[240px] transition-all">
         <Header showLiveIndicator userName="Harsh Pardhi" />
 
         <main className="p-4 lg:p-5">
-          <div className="max-w-7xl mx-auto">
+          <div ref={dashboardRef} className="max-w-7xl mx-auto">
+            {/* ── Header ── */}
             <div className="flex items-start justify-between mb-5">
               <div>
                 <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-1">Observability Agent</h1>
                 <p className="text-sm text-gray-500 dark:text-slate-400">
-                  Real-time monitoring and analytics for your Azure infrastructure.
+                  Real-time monitoring and analytics from Azure Monitor, Resource Graph, Advisor & Defender.
+                  {stats?.synced_at && (
+                    <span className="ml-2 text-xs text-gray-400">Last sync: {new Date(stats.synced_at).toLocaleString()}</span>
+                  )}
                 </p>
+                {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
               </div>
               <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleResync}
+                  disabled={syncing || loading}
+                  className="h-8 text-xs gap-1.5"
+                >
+                  <RefreshCw className={cn("h-3.5 w-3.5", syncing && "animate-spin")} />
+                  {syncing ? "Resyncing..." : "Resync"}
+                </Button>
                 <div className="relative">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setReportDropdownOpen(!reportDropdownOpen)}
-                    className="h-8 text-xs gap-1.5"
-                  >
-                    <LayoutDashboard className="h-3.5 w-3.5" />
-                    {currentReportLabel}
-                    <ChevronDown className="h-3 w-3" />
-                  </Button>
-                  <AnimatePresence>
-                    {reportDropdownOpen && (
-                      <motion.div
-                        initial={{ opacity: 0, y: -4 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -4 }}
-                        className="absolute right-0 mt-1 w-56 border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-lg shadow-lg z-50 overflow-hidden"
-                      >
-                        {reportOptions.map((opt) => (
-                          <button
-                            key={opt.id}
-                            onClick={() => { setSelectedReport(opt.id); setReportDropdownOpen(false); }}
-                            className={cn(
-                              "w-full text-left px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors",
-                              selectedReport === opt.id
-                                ? "text-azure-600 dark:text-azure-400 font-semibold bg-azure-50 dark:bg-azure-900/20"
-                                : "text-gray-700 dark:text-slate-300"
-                            )}
-                          >
-                            {opt.label}
-                          </button>
-                        ))}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-
-                <div className="relative">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setExportOpen(!exportOpen)}
-                    className="h-8 text-xs gap-1.5"
-                  >
+                  <Button variant="outline" size="sm" onClick={() => setExportOpen(!exportOpen)} className="h-8 text-xs gap-1.5">
                     <Download className="h-3.5 w-3.5" />
                     Export
                     <ChevronDown className="h-3 w-3" />
@@ -816,7 +800,7 @@ export default function ObservabilityDashboardPage() {
                         {["PNG", "PDF", "CSV"].map((fmt) => (
                           <button
                             key={fmt}
-                            onClick={() => handleExport(fmt)}
+                            onClick={() => { setExportOpen(false); handleExport(fmt); }}
                             className="w-full text-left px-3 py-2 text-xs text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors flex items-center gap-2"
                           >
                             <Download className="h-3.5 w-3.5" />
@@ -830,23 +814,28 @@ export default function ObservabilityDashboardPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-5">
-              {data.kpis.map((kpi, i) => (
-                <KpiCard key={kpi.title} data={kpi} index={i} />
-              ))}
+            {/* ── Tenant Overview KPIs ── */}
+            <div className="mb-5">
+              <div className="flex items-center gap-2 mb-3">
+                <LayoutDashboard className="h-4 w-4 text-azure-500" />
+                <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Tenant Overview</h2>
+                {loading && <span className="text-[10px] text-gray-400">Loading...</span>}
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                {overviewKpis.map((kpi, i) => (
+                  <OverviewKpiCard key={kpi.label} data={kpi} index={i} />
+                ))}
+              </div>
             </div>
 
+            {/* ── Charts ── */}
             <div className="mb-5">
               <div className="flex items-center gap-2 mb-3">
                 <BarChart3 className="h-4 w-4 text-azure-500" />
                 <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Monitoring Charts</h2>
                 <span className="text-[10px] text-gray-400 dark:text-slate-500">Drag to rearrange · Resize from bottom-right</span>
               </div>
-              <div
-                ref={gridRef}
-                className="relative"
-                style={{ height: `${gridHeight}px`, minHeight: "520px" }}
-              >
+              <div ref={gridRef} className="relative" style={{ height: `${gridHeight}px`, minHeight: "520px" }}>
                 {chartConfigs.map((cfg) => {
                   const pos = positions[cfg.id] ?? { x: 0, y: 0 };
                   const sz = sizes[cfg.id] ?? { w: CHART_W, h: CHART_H };
@@ -856,7 +845,7 @@ export default function ObservabilityDashboardPage() {
                       id={cfg.id}
                       title={cfg.title}
                       icon={cfg.icon}
-                      reportData={data}
+                      chartContext={chartContext}
                       minimized={!!minimized[cfg.id]}
                       onToggleMinimize={() => toggleMinimized(cfg.id)}
                       position={pos}
@@ -869,7 +858,8 @@ export default function ObservabilityDashboardPage() {
               </div>
             </div>
 
-            <DataTable rows={data.tableRows} />
+            {/* ── Resource Summary Table ── */}
+            <DataTable rows={tableRows} />
           </div>
         </main>
       </div>

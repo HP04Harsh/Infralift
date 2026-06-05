@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { AgentLayout } from "@/components/layout/AgentLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,30 +8,12 @@ import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
 import {
   Server, Database, Container, Cloud, Layers, Network,
-  ArrowLeft, Search, ChevronUp, ChevronDown,
-  CheckCircle, Activity, XCircle, Clock
+  ArrowLeft, Search, ChevronUp, ChevronDown, Download,
+  CheckCircle, Activity, XCircle, Clock, ChevronLeft, ChevronRight
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-type Deployment = {
-  name: string;
-  type: string;
-  status: "completed" | "in-progress" | "failed";
-  dateTime: string;
-  initiatedBy: string;
-};
-
-const mockDeployments: Deployment[] = [
-  { name: "prod-web-vm-001", type: "Virtual Machine", status: "completed", dateTime: "2026-05-28 14:32", initiatedBy: "Harsh Pardhi" },
-  { name: "dev-storage-acc", type: "Storage Account", status: "completed", dateTime: "2026-05-28 11:15", initiatedBy: "Priya Sharma" },
-  { name: "staging-aks-cluster", type: "AKS Cluster", status: "in-progress", dateTime: "2026-05-28 09:00", initiatedBy: "Rahul Verma" },
-  { name: "prod-app-service", type: "App Service", status: "completed", dateTime: "2026-05-27 16:45", initiatedBy: "Harsh Pardhi" },
-  { name: "core-rg-prod", type: "Resource Group", status: "completed", dateTime: "2026-05-27 14:20", initiatedBy: "Ananya Gupta" },
-  { name: "vnet-hub-prod", type: "Networking", status: "completed", dateTime: "2026-05-27 12:10", initiatedBy: "Vikram Singh" },
-  { name: "analytics-db", type: "Database", status: "failed", dateTime: "2026-05-27 10:30", initiatedBy: "Priya Sharma" },
-  { name: "dev-web-vm-002", type: "Virtual Machine", status: "completed", dateTime: "2026-05-26 15:00", initiatedBy: "Rahul Verma" },
-  { name: "logging-storage", type: "Storage Account", status: "in-progress", dateTime: "2026-05-26 11:00", initiatedBy: "Harsh Pardhi" },
-];
+import { useDeploymentStore, type Deployment, type DeploymentStatus } from "@/store/deploymentStore";
+import { apiService } from "@/services/api";
 
 const typeIcons: Record<string, { icon: React.ReactNode; color: string }> = {
   "Virtual Machine": { icon: <Server className="h-4 w-4" />, color: "text-purple-500" },
@@ -49,24 +31,62 @@ const statusConfig = {
   "failed": { icon: XCircle, className: "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400" },
 };
 
+const defaultIcon = { icon: <Server className="h-4 w-4" />, color: "text-gray-500" };
+
 type SortKey = keyof Deployment;
 type SortDir = "asc" | "desc";
 
+const PAGE_SIZE = 10;
+
+const mapResourceToDeployment = (resource: Record<string, unknown>): Deployment => ({
+  id: (resource.resourceId as string) || (resource.id as string) || '',
+  name: (resource.resourceName as string) || (resource.name as string) || '',
+  type: (resource.resourceType as string) || (resource.type as string) || '',
+  status: ((resource.status as string) || 'completed') as DeploymentStatus,
+  dateTime: resource.createdAt
+    ? new Date(resource.createdAt as string).toLocaleString()
+    : new Date().toLocaleString(),
+  initiatedBy: (resource.initiatedBy as string) || (resource.userId as string) || 'System',
+  agentType: (resource.agentType as string) || 'provisioning',
+});
+
 export default function ProvisioningHistoryPage() {
   const router = useRouter();
+  const storedDeployments = useDeploymentStore((s) => s.deployments);
+  const setDeployments = useDeploymentStore((s) => s.setDeployments);
+  const [deployments, setLocalDeployments] = useState<Deployment[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("dateTime");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [page, setPage] = useState(1);
+
+  useEffect(() => {
+    const fetchDeployments = async () => {
+      try {
+        setLoading(true);
+        const response = (await apiService.getDeployments()) as { resources?: Record<string, unknown>[] };
+        const mapped = (response.resources || []).map(mapResourceToDeployment);
+        setLocalDeployments(mapped);
+        setDeployments(mapped);
+      } catch {
+        setLocalDeployments(storedDeployments);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchDeployments();
+  }, []);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
-    return mockDeployments.filter((d) =>
+    return deployments.filter((d) =>
       d.name.toLowerCase().includes(q) ||
       d.type.toLowerCase().includes(q) ||
       d.status.toLowerCase().includes(q) ||
       d.initiatedBy.toLowerCase().includes(q)
     );
-  }, [search]);
+  }, [search, deployments]);
 
   const sorted = useMemo(() => {
     return [...filtered].sort((a, b) => {
@@ -77,6 +97,10 @@ export default function ProvisioningHistoryPage() {
     });
   }, [filtered, sortKey, sortDir]);
 
+  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const paginated = sorted.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
   const handleSort = (key: SortKey) => {
     if (key === sortKey) {
       setSortDir((prev) => (prev === "asc" ? "desc" : "asc"));
@@ -84,6 +108,7 @@ export default function ProvisioningHistoryPage() {
       setSortKey(key);
       setSortDir("asc");
     }
+    setPage(1);
   };
 
   const SortHeader = ({ column, label }: { column: SortKey; label: string }) => (
@@ -101,6 +126,19 @@ export default function ProvisioningHistoryPage() {
       </div>
     </th>
   );
+
+  const handleExportCSV = () => {
+    const headers = ["Deployment Name", "Type", "Status", "Date/Time", "Initiated By"];
+    const rows = sorted.map((d) => [d.name, d.type, d.status, d.dateTime, d.initiatedBy]);
+    const csvContent = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `deployments_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <AgentLayout>
@@ -120,13 +158,24 @@ export default function ProvisioningHistoryPage() {
               <p className="text-sm text-gray-500 dark:text-slate-400">Deployment History</p>
             </div>
           </div>
-          <Button
-            size="sm"
-            onClick={() => router.push("/provisioning/chat")}
-            className="h-8 bg-azure-500 hover:bg-azure-600"
-          >
-            New Deployment
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleExportCSV}
+              className="h-8"
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Export CSV
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => router.push("/provisioning/chat")}
+              className="h-8 bg-azure-500 hover:bg-azure-600"
+            >
+              New Deployment
+            </Button>
+          </div>
         </div>
 
         <div className="flex items-center gap-3">
@@ -139,7 +188,7 @@ export default function ProvisioningHistoryPage() {
               className="pl-9 h-9 text-sm"
             />
           </div>
-          <span className="text-xs text-gray-400 dark:text-slate-500">{sorted.length} deployments</span>
+          <span className="text-xs text-gray-400 dark:text-slate-500">{loading ? 'Loading...' : `${sorted.length} deployments`}</span>
         </div>
 
         <div className="border border-gray-200/50 dark:border-slate-700/50 bg-white dark:bg-slate-800/50 rounded-xl overflow-hidden shadow-sm">
@@ -155,14 +204,14 @@ export default function ProvisioningHistoryPage() {
                 </tr>
               </thead>
               <tbody>
-                {sorted.map((deployment, index) => {
-                  const typeInfo = typeIcons[deployment.type] || typeIcons["Virtual Machine"];
+                {paginated.map((deployment, index) => {
+                  const typeInfo = typeIcons[deployment.type] || defaultIcon;
                   const statusInfo = statusConfig[deployment.status];
                   const StatusIcon = statusInfo.icon;
 
                   return (
                     <motion.tr
-                      key={deployment.name}
+                      key={deployment.id}
                       initial={{ opacity: 0, y: 8 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ duration: 0.25, delay: index * 0.03 }}
@@ -191,10 +240,10 @@ export default function ProvisioningHistoryPage() {
                     </motion.tr>
                   );
                 })}
-                {sorted.length === 0 && (
+                {paginated.length === 0 && (
                   <tr>
                     <td colSpan={5} className="py-12 text-center text-sm text-gray-400 dark:text-slate-500">
-                      No deployments found
+                      {deployments.length === 0 ? "No deployments yet. Start a deployment from the Provisioning Agent." : "No deployments found"}
                     </td>
                   </tr>
                 )}
@@ -202,6 +251,46 @@ export default function ProvisioningHistoryPage() {
             </table>
           </div>
         </div>
+
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between pt-2">
+            <span className="text-xs text-gray-500 dark:text-slate-400">
+              Page {currentPage} of {totalPages} ({sorted.length} total)
+            </span>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage(currentPage - 1)}
+                disabled={currentPage <= 1}
+                className="h-8 w-8 p-0"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
+                <Button
+                  key={p}
+                  variant={p === currentPage ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setPage(p)}
+                  className={cn("h-8 w-8 p-0 text-xs", p === currentPage && "bg-azure-500 hover:bg-azure-600")}
+                >
+                  {p}
+                </Button>
+              ))}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage(currentPage + 1)}
+                disabled={currentPage >= totalPages}
+                className="h-8 w-8 p-0"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
     </AgentLayout>
   );

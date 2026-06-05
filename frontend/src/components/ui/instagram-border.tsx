@@ -10,22 +10,23 @@ interface InstagramBorderProps {
 export function InstagramBorder({ children, className }: InstagramBorderProps) {
   return (
     <div className={cn("relative", className)}>
-      <div className="absolute inset-0 rounded-2xl p-[2px]">
-        <div className="h-full w-full rounded-2xl animate-spin" style={{
-          background: "linear-gradient(90deg, #ff0000, #0000ff, #ff0000)",
-          backgroundSize: "200% 200%",
-          animation: "gradient-rotate 3s linear infinite",
-        }} />
+      <div className="absolute -inset-4 overflow-hidden rounded-2xl">
+        <div
+          className="absolute -inset-[100%]"
+          style={{
+            background: "conic-gradient(from 0deg, #ff0000, #00ff00, #0000ff, #ff0000)",
+            animation: "spin 3s linear infinite",
+          }}
+        />
       </div>
       <div className="absolute inset-[2px] rounded-2xl bg-white dark:bg-slate-900" />
       <div className="relative z-10">
         {children}
       </div>
       <style jsx>{`
-        @keyframes gradient-rotate {
-          0% { background-position: 0% 50%; }
-          50% { background-position: 100% 50%; }
-          100% { background-position: 0% 50%; }
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
         }
       `}</style>
     </div>

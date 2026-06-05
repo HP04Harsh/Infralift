@@ -9,41 +9,65 @@ import { Eye, EyeOff, CheckCircle2, AlertCircle } from "lucide-react";
 import { useOnboardingStore } from "@/store/onboardingStore";
 import { motion } from "framer-motion";
 import { Loader2 } from "lucide-react";
+import { apiService } from "@/services/api";
 
 export function TenantConnectForm() {
-  const { completedSteps, completeStep, setCurrentStep, setTenantId, setSubscriptionId } = useOnboardingStore();
+  const { completedSteps, completeStep, setCurrentStep, setTenantId, setSubscriptionId, setClientId, setClientSecret, setEnvironmentName } = useOnboardingStore();
   const step1Completed = completedSteps.includes(1);
   
   const [formData, setFormData] = useState({
     clientId: "",
     clientSecret: "",
     tenantId: "",
+    subscriptionId: "",
     environmentName: "",
     notes: "",
   });
   
   const [showSecret, setShowSecret] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [connectError, setConnectError] = useState("");
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   
-  const isFormValid = formData.clientId && formData.clientSecret && formData.tenantId && formData.environmentName;
+  const isFormValid = formData.clientId && formData.clientSecret && formData.tenantId && formData.subscriptionId && formData.environmentName;
 
   const handleConnect = async () => {
     if (!step1Completed) return;
     
     setIsConnecting(true);
-    // Simulate connection
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    setConnectError("");
     
-    // Store the tenant and subscription IDs
-    setTenantId(formData.tenantId);
-    setSubscriptionId(formData.clientId); // Using clientId as subscriptionId for now
-    
-    // Complete step 2 and move to step 3
-    completeStep(2);
-    setCurrentStep(3);
-    
-    setIsConnecting(false);
+    try {
+      const res = await apiService.connectTenant({
+        client_id: formData.clientId,
+        client_secret: formData.clientSecret,
+        tenant_id: formData.tenantId,
+        subscription_id: formData.subscriptionId,
+        environment_name: formData.environmentName,
+        user_id: "default",
+      });
+      
+      if (!(res as any)?.success) {
+        setConnectError((res as any)?.message || "Failed to connect tenant");
+        setIsConnecting(false);
+        return;
+      }
+      
+      // Store all credentials in onboarding store
+      setTenantId(formData.tenantId);
+      setSubscriptionId(formData.subscriptionId);
+      setClientId(formData.clientId);
+      setClientSecret(formData.clientSecret);
+      setEnvironmentName(formData.environmentName);
+      
+      // Complete step 2 and move to step 3
+      completeStep(2);
+      setCurrentStep(3);
+    } catch (err: any) {
+      setConnectError(err?.message || "Connection failed. Please check your credentials and try again.");
+    } finally {
+      setIsConnecting(false);
+    }
   };
 
   const handleBlur = (field: string) => {
@@ -124,6 +148,26 @@ export function TenantConnectForm() {
                       The tenant value from the SP output
                     </p>
                   </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="subscriptionId" className="text-xs font-medium text-gray-700 dark:text-slate-300">
+                      Subscription ID
+                    </Label>
+                    <div className="relative">
+                      <Input
+                        id="subscriptionId"
+                        placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                        value={formData.subscriptionId}
+                        onChange={(e) => setFormData({ ...formData, subscriptionId: e.target.value })}
+                        onBlur={() => handleBlur("subscriptionId")}
+                        className="dark:bg-slate-900 dark:border-slate-600 dark:text-white h-10 text-xs pr-10"
+                      />
+                      {renderFieldIcon(getFieldState("subscriptionId", formData.subscriptionId))}
+                    </div>
+                    <p className="text-[10px] text-gray-500 dark:text-slate-400">
+                      The subscription to scan for resources
+                    </p>
+                  </div>
                 </div>
 
                 {/* Right Column */}
@@ -195,6 +239,12 @@ export function TenantConnectForm() {
 
               {/* Connect Button */}
               <div className="pt-2">
+                {connectError && (
+                  <div className="flex items-center gap-2 mb-3 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                    <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />
+                    <p className="text-xs text-red-600 dark:text-red-400">{connectError}</p>
+                  </div>
+                )}
                 <Button
                   onClick={handleConnect}
                   disabled={!step1Completed || !isFormValid || isConnecting}

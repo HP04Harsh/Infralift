@@ -51,6 +51,14 @@ export interface AgentSettings {
   timeout: number;
 }
 
+export interface InfrastructureStorageSettings {
+  storageType: 'azure_blob' | 'azure_files' | 'azure_data_lake';
+  storageAccount: string;
+  containerName: string;
+  accessKey: string;
+  validated: boolean;
+}
+
 export interface SettingsState {
   general: GeneralSettings;
   customization: CustomizationSettings;
@@ -67,6 +75,7 @@ export interface SettingsState {
     itsm: AgentSettings;
     compliance: AgentSettings;
   };
+  infrastructureStorage: InfrastructureStorageSettings;
   
   // Actions
   updateGeneral: (settings: Partial<GeneralSettings>) => void;
@@ -75,6 +84,7 @@ export interface SettingsState {
   updateSecurity: (settings: Partial<SecuritySettings>) => void;
   updateAppearance: (settings: Partial<AppearanceSettings>) => void;
   updateAgentSettings: (agent: keyof SettingsState['agents'], settings: Partial<AgentSettings>) => void;
+  updateInfrastructureStorage: (settings: Partial<InfrastructureStorageSettings>) => void;
   resetSettings: () => void;
 }
 
@@ -117,6 +127,14 @@ const defaultAppearanceSettings: AppearanceSettings = {
   compactSidebar: false,
 };
 
+const defaultInfrastructureStorage: InfrastructureStorageSettings = {
+  storageType: 'azure_blob',
+  storageAccount: '',
+  containerName: 'terraform-artifacts',
+  accessKey: '',
+  validated: false,
+};
+
 const defaultAgentSettings: AgentSettings = {
   openaiApiKey: '',
   azureEndpoint: '',
@@ -146,6 +164,7 @@ export const useSettingsStore = create<SettingsState>()(
         itsm: defaultAgentSettings,
         compliance: defaultAgentSettings,
       },
+      infrastructureStorage: defaultInfrastructureStorage,
 
       updateGeneral: (settings) =>
         set((state) => ({
@@ -180,6 +199,11 @@ export const useSettingsStore = create<SettingsState>()(
           },
         })),
 
+      updateInfrastructureStorage: (settings) =>
+        set((state) => ({
+          infrastructureStorage: { ...state.infrastructureStorage, ...settings },
+        })),
+
       resetSettings: () =>
         set({
           general: defaultGeneralSettings,
@@ -197,6 +221,7 @@ export const useSettingsStore = create<SettingsState>()(
             itsm: defaultAgentSettings,
             compliance: defaultAgentSettings,
           },
+          infrastructureStorage: defaultInfrastructureStorage,
         }),
     }),
     {

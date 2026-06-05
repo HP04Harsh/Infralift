@@ -43,17 +43,19 @@ class AIExecutionService:
         agent_type: str,
         user_id: str,
         conversation_context: Optional[Dict[str, Any]] = None,
-        tenant_context: Optional[Dict[str, Any]] = None
+        tenant_context: Optional[Dict[str, Any]] = None,
+        azure_credentials: Optional[Dict[str, str]] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Execute AI chat with streaming responses
         
         Args:
             message: User message
-            agent_type: Type of agent (provisioning, assessment, etc.)
+            agent_type: Type of agent
             user_id: User identifier
             conversation_context: Previous conversation history
             tenant_context: Azure tenant context for system prompt
+            azure_credentials: Per-request Azure OpenAI credentials override
             
         Yields:
             Dict with streaming updates
@@ -72,23 +74,28 @@ class AIExecutionService:
             # Build system prompt with tenant context
             system_prompt = await self._build_system_prompt(agent_type, tenant_context)
             
+            # Determine provider: use per-request credentials if provided
+            provider = self.provider
+            if azure_credentials and azure_credentials.get("azure_endpoint") and azure_credentials.get("azure_key"):
+                provider = AIProvider.AZURE_OPENAI
+            
             # Execute based on provider
-            if self.provider == AIProvider.AZURE_OPENAI:
+            if provider == AIProvider.AZURE_OPENAI:
                 async for chunk in self._execute_azure_openai(
-                    message, system_prompt, conversation_context
+                    message, system_prompt, conversation_context, azure_credentials
                 ):
                     yield chunk
-            elif self.provider == AIProvider.OPENAI:
+            elif provider == AIProvider.OPENAI:
                 async for chunk in self._execute_openai(
                     message, system_prompt, conversation_context
                 ):
                     yield chunk
-            elif self.provider == AIProvider.CLAUDE:
+            elif provider == AIProvider.CLAUDE:
                 async for chunk in self._execute_claude(
                     message, system_prompt, conversation_context
                 ):
                     yield chunk
-            elif self.provider == AIProvider.GEMINI:
+            elif provider == AIProvider.GEMINI:
                 async for chunk in self._execute_gemini(
                     message, system_prompt, conversation_context
                 ):
@@ -306,16 +313,27 @@ Tenant Context:
         self,
         message: str,
         system_prompt: str,
-        conversation_context: Optional[Dict[str, Any]]
+        conversation_context: Optional[Dict[str, Any]],
+        azure_credentials: Optional[Dict[str, str]] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """Execute chat using Azure OpenAI with streaming"""
         try:
             from openai import AsyncAzureOpenAI
             
+            # Use per-request credentials if provided, otherwise fall back to env vars
+            api_key = azure_credentials.get("azure_key") if azure_credentials else settings.AZURE_OPENAI_KEY
+            api_version = azure_credentials.get("azure_api_version") if azure_credentials else settings.AZURE_OPENAI_API_VERSION
+            azure_endpoint = azure_credentials.get("azure_endpoint") if azure_credentials else settings.AZURE_OPENAI_ENDPOINT
+            deployment = azure_credentials.get("azure_deployment") if azure_credentials else settings.AZURE_OPENAI_DEPLOYMENT
+            
+            if not api_key or not azure_endpoint:
+                yield {"type": "error", "status": AIStatus.ERROR, "message": "Azure OpenAI credentials not configured. Go to Settings > Agents to configure."}
+                return
+            
             client = AsyncAzureOpenAI(
-                api_key=settings.AZURE_OPENAI_KEY,
-                api_version=settings.AZURE_OPENAI_API_VERSION,
-                azure_endpoint=settings.AZURE_OPENAI_ENDPOINT
+                api_key=api_key,
+                api_version=api_version or "2024-02-15-preview",
+                azure_endpoint=azure_endpoint
             )
             
             # Build messages
@@ -336,7 +354,7 @@ Tenant Context:
             
             # Stream response
             stream = await client.chat.completions.create(
-                model=settings.AZURE_OPENAI_DEPLOYMENT,
+                model=deployment or settings.AZURE_OPENAI_DEPLOYMENT,
                 messages=messages,
                 stream=True,
                 temperature=0.7,

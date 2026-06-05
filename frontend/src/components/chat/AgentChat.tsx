@@ -1,20 +1,23 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, MessageCircle, ArrowLeft, Bot, User } from "lucide-react";
+import { ArrowLeft, Bot, User, CheckCircle, Loader, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { AnimatedInput } from "@/components/ui/animated-input";
-import { InstagramBorder } from "@/components/ui/instagram-border";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { useRouter } from "next/navigation";
+import { AnimatedChatInput } from "@/components/assistant/AnimatedChatInput";
+import { AIActivityTimeline } from "@/components/chat/AIActivityTimeline";
+import { apiService } from "@/services/api";
+import { useSettingsStore } from "@/store/settingsStore";
 
 interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
   timestamp: Date;
+  events?: any[];
 }
 
 interface AgentChatProps {
@@ -23,61 +26,56 @@ interface AgentChatProps {
   initialPrompt?: string;
 }
 
-const agentResponses: Record<string, (prompt: string) => string> = {
-  provisioning: (p) => `I'll help you provision the requested resources. Based on your request "${p}", I recommend starting with a standard VM series in the East US region. Would you like me to proceed with the default configuration?`,
-  assessment: (p) => `Let me analyze your Azure environment for "${p}". Currently scanning 156 resources across 12 resource groups. I'll provide a comprehensive assessment report with cost optimization and security recommendations.`,
-  migration: (p) => `For your migration request "${p}", I've identified the workloads that need to be migrated. The assessment shows 3 VMs, 2 databases, and 5 storage accounts are ready for migration. Recommended approach: lift-and-shift with minimal refactoring.`,
-  observability: (p) => `Analyzing your observability data for "${p}". Current metrics show 99.8% uptime across all services, average response time of 45ms, and 0.3% error rate. No anomalies detected in the last 24 hours.`,
-  optimization: (p) => `Optimizing your infrastructure based on "${p}". I've identified potential cost savings of 23% by right-sizing 8 VMs and 15% by moving 3 storage accounts to cooler tiers. Would you like a detailed breakdown?`,
-  troubleshoot: (p) => `Troubleshooting "${p}". Analyzing recent logs and metrics... I've found 2 related incidents in the last hour. The most likely cause is a configuration drift in the network security group. Let me suggest a fix.`,
-  itsm: (p) => `Creating an ITSM ticket for "${p}". I've categorized this as a service request with medium priority. The estimated resolution time is 4 hours. Would you like me to escalate if not resolved within the SLA window?`,
-  compliance: (p) => `Running compliance scan for "${p}". Checking against Azure Policy and industry standards (SOC 2, ISO 27001). Found 3 non-compliant resources: 2 storage accounts without encryption and 1 VM without backup configured.`,
-  dashboard: (p) => `Here's your dashboard overview for "${p}". All systems operational. Key metrics: 156 resources managed, 99.9% uptime, 0.3% error rate, 24 active alerts. Ready to help with any specific queries.`,
-};
-
 export function AgentChat({ agentName, agentType, initialPrompt = "" }: AgentChatProps) {
   const router = useRouter();
   const [messages, setMessages] = useState<Message[]>([]);
-  const [inputValue, setInputValue] = useState(initialPrompt);
+  const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const initialPromptSent = useRef(false);
+  const effectRan = useRef(false);
+  const isSubmitting = useRef(false);
+  const agentSettings = useSettingsStore((s) => s.agents[agentType as keyof typeof s.agents]);
 
-  // Load chat history from localStorage (simulating Redis persistence)
+  const hasAzureOpenAI = Boolean(
+    agentSettings?.azureEndpoint &&
+    agentSettings?.openaiApiKey &&
+    agentSettings?.model
+  );
+
   useEffect(() => {
     const savedMessages = localStorage.getItem(`chat_${agentType}`);
     if (savedMessages) {
-      const parsed = JSON.parse(savedMessages);
-      setMessages(parsed.map((msg: any) => ({
-        ...msg,
-        timestamp: new Date(msg.timestamp)
-      })));
+      try {
+        const parsed = JSON.parse(savedMessages);
+        setMessages(parsed.map((msg: any) => ({
+          ...msg,
+          timestamp: new Date(msg.timestamp)
+        })));
+      } catch { /* ignore corrupt data */ }
     }
   }, [agentType]);
 
-  // Save chat history to localStorage (simulating Redis persistence)
   useEffect(() => {
     if (messages.length > 0) {
       localStorage.setItem(`chat_${agentType}`, JSON.stringify(messages));
     }
   }, [messages, agentType]);
 
-  // Auto-scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Handle initial prompt (only once, prevents double-send in Strict Mode)
   useEffect(() => {
-    if (initialPrompt && !initialPromptSent.current) {
-      initialPromptSent.current = true;
-      handleSend(initialPrompt);
+    if (effectRan.current) return;
+    effectRan.current = true;
+    if (initialPrompt) {
+      setTimeout(() => handleSend(initialPrompt), 300);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [initialPrompt]);
 
-  const handleSend = async (content: string) => {
-    if (!content.trim() || isLoading) return;
+  const handleSend = useCallback(async (content: string) => {
+    if (!content.trim() || isLoading || isSubmitting.current) return;
+    isSubmitting.current = true;
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -90,28 +88,67 @@ export function AgentChat({ agentName, agentType, initialPrompt = "" }: AgentCha
     setInputValue("");
     setIsLoading(true);
 
-    // Agent-specific response
-    const responder = agentResponses[agentType] || ((p: string) => `I understand you want to ${p}. Let me help you with that...`);
-    const responseContent = responder(content);
+    try {
+      let responseText = "";
+      let events: any[] = [];
 
-    setTimeout(() => {
+      if (hasAzureOpenAI) {
+        events = [
+          { type: "activity", icon: "MessageSquare", title: "Sending to Azure OpenAI...", status: "in_progress" },
+        ];
+
+        const res: any = await apiService.aiChat({
+          message: content,
+          agent_type: agentType,
+          conversation_context: {
+            history: messages.slice(-10).map(m => ({
+              role: m.role,
+              content: m.content,
+            })),
+          },
+          azure_endpoint: agentSettings.azureEndpoint,
+          azure_key: agentSettings.openaiApiKey,
+          azure_deployment: agentSettings.model,
+          azure_api_version: "2024-02-15-preview",
+        });
+
+        events = res?.events || [];
+        responseText = res?.full_response || "";
+
+        if (!responseText) {
+          responseText = "I processed your request. How can I help further?";
+        }
+      } else {
+        responseText = "Azure OpenAI is not configured. Go to **Settings > Agents** to configure your AI provider credentials.";
+        events = [
+          { type: "activity", icon: "AlertTriangle", title: "AI Not Configured", status: "error" },
+          { type: "result", icon: "Settings", title: "Configure in Settings", status: "completed" },
+        ];
+      }
+
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
-        content: responseContent,
+        content: responseText,
         timestamp: new Date(),
+        events,
       };
-      setMessages((prev) => [...prev, assistantMessage]);
-      setIsLoading(false);
-    }, 1500);
-  };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend(inputValue);
+      setMessages((prev) => [...prev, assistantMessage]);
+    } catch (error: any) {
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: "assistant",
+        content: `**Error:** ${error?.message || "Request failed. Check your Azure OpenAI configuration in Settings > Agents."}`,
+        timestamp: new Date(),
+        events: [{ type: "activity", icon: "AlertTriangle", title: "Error", status: "error" }],
+      };
+      setMessages((prev) => [...prev, errorMessage]);
+    } finally {
+      setIsLoading(false);
+      isSubmitting.current = false;
     }
-  };
+  }, [agentType, agentSettings, hasAzureOpenAI, isLoading, messages]);
 
   const placeholderTexts = [
     `Ask ${agentName} anything...`,
@@ -122,12 +159,11 @@ export function AgentChat({ agentName, agentType, initialPrompt = "" }: AgentCha
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-slate-950 flex">
       <Sidebar />
-      
+
       <div className="flex-1 lg:ml-[240px] transition-all">
         <Header showLiveIndicator userName="Harsh Pardhi" />
-        
+
         <main className="h-[calc(100vh-56px)] flex flex-col">
-          {/* Chat Header */}
           <div className="bg-white dark:bg-slate-900 border-b border-gray-200 dark:border-slate-800 px-4 lg:px-6 py-4">
             <div className="flex items-center gap-3">
               <Button
@@ -146,17 +182,39 @@ export function AgentChat({ agentName, agentType, initialPrompt = "" }: AgentCha
                   <h1 className="text-lg font-semibold text-gray-900 dark:text-white">
                     {agentName}
                   </h1>
-                  <p className="text-sm text-gray-500 dark:text-slate-400">
+                  <p className="text-sm text-gray-500 dark:text-slate-400 flex items-center gap-2">
                     {agentType} Agent
+                    {hasAzureOpenAI ? (
+                      <span className="inline-flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
+                        <CheckCircle className="h-3 w-3" />
+                        Azure OpenAI
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
+                        <AlertTriangle className="h-3 w-3" />
+                        Not Configured
+                      </span>
+                    )}
                   </p>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Messages Area */}
           <div className="flex-1 overflow-y-auto px-4 lg:px-6 py-6">
             <div className="max-w-4xl mx-auto space-y-4">
+              {!hasAzureOpenAI && messages.length === 0 && !isLoading && (
+                <div className="text-center py-12">
+                  <AlertTriangle className="h-12 w-12 text-amber-400 mx-auto mb-4" />
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Azure OpenAI Not Configured</h2>
+                  <p className="text-sm text-gray-500 dark:text-slate-400 max-w-md mx-auto mb-4">
+                    Configure your Azure OpenAI endpoint, API key, and deployment in Settings to enable AI-powered responses.
+                  </p>
+                  <Button onClick={() => router.push('/settings')} variant="default" className="bg-azure-600 hover:bg-azure-700">
+                    Go to Settings
+                  </Button>
+                </div>
+              )}
               <AnimatePresence>
                 {messages.map((message) => (
                   <motion.div
@@ -165,35 +223,44 @@ export function AgentChat({ agentName, agentType, initialPrompt = "" }: AgentCha
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -20 }}
                     transition={{ duration: 0.3 }}
-                    className={`flex gap-3 ${
-                      message.role === "user" ? "justify-end" : "justify-start"
-                    }`}
                   >
-                    {message.role === "assistant" && (
-                      <div className="h-8 w-8 bg-azure-500 rounded-full flex items-center justify-center flex-shrink-0">
-                        <Bot className="h-4 w-4 text-white" />
+                    <div className={`flex gap-3 ${message.role === "user" ? "justify-end" : "justify-start"}`}>
+                      {message.role === "assistant" && (
+                        <div className="h-8 w-8 bg-azure-500 rounded-full flex items-center justify-center flex-shrink-0">
+                          <Bot className="h-4 w-4 text-white" />
+                        </div>
+                      )}
+                      <div className="max-w-[80%] space-y-2">
+                        {message.role === "assistant" && message.events && message.events.length > 0 && (
+                          <AIActivityTimeline events={message.events} />
+                        )}
+                        <div
+                          className={`rounded-2xl px-4 py-3 ${
+                            message.role === "user"
+                              ? "bg-azure-500 text-white rounded-br-md"
+                              : "bg-white dark:bg-slate-800 text-gray-900 dark:text-white border border-gray-200 dark:border-slate-700 rounded-bl-md"
+                          }`}
+                        >
+                          <div className="text-sm whitespace-pre-wrap" dangerouslySetInnerHTML={{
+                            __html: message.content
+                              .replace(/\n/g, "<br/>")
+                              .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+                              .replace(/`([^`]+)`/g, "<code class='bg-gray-100 dark:bg-slate-900 px-1 rounded text-xs font-mono'>$1</code>")
+                          }} />
+                          <p className="text-xs mt-1 opacity-70">
+                            {message.timestamp.toLocaleTimeString([], {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          </p>
+                        </div>
                       </div>
-                    )}
-                    <div
-                      className={`max-w-[80%] rounded-2xl px-4 py-3 ${
-                        message.role === "user"
-                          ? "bg-azure-500 text-white rounded-br-md"
-                          : "bg-white dark:bg-slate-800 text-gray-900 dark:text-white border border-gray-200 dark:border-slate-700 rounded-bl-md"
-                      }`}
-                    >
-                      <p className="text-sm">{message.content}</p>
-                      <p className="text-xs mt-1 opacity-70">
-                        {message.timestamp.toLocaleTimeString([], {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </p>
+                      {message.role === "user" && (
+                        <div className="h-8 w-8 bg-emerald-500 rounded-full flex items-center justify-center flex-shrink-0">
+                          <User className="h-4 w-4 text-white" />
+                        </div>
+                      )}
                     </div>
-                    {message.role === "user" && (
-                      <div className="h-8 w-8 bg-emerald-500 rounded-full flex items-center justify-center flex-shrink-0">
-                        <User className="h-4 w-4 text-white" />
-                      </div>
-                    )}
                   </motion.div>
                 ))}
                 {isLoading && (
@@ -205,11 +272,19 @@ export function AgentChat({ agentName, agentType, initialPrompt = "" }: AgentCha
                     <div className="h-8 w-8 bg-azure-500 rounded-full flex items-center justify-center flex-shrink-0">
                       <Bot className="h-4 w-4 text-white" />
                     </div>
-                    <div className="bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-2xl rounded-bl-md px-4 py-3">
-                      <div className="flex gap-1">
-                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
-                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-100" />
-                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-200" />
+                    <div className="space-y-2">
+                      <AIActivityTimeline
+                        events={[
+                          { type: "activity", icon: "MessageSquare", title: "Processing with Azure OpenAI...", status: "in_progress" },
+                        ]}
+                        isStreaming={true}
+                      />
+                      <div className="bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-2xl rounded-bl-md px-4 py-3">
+                        <div className="flex gap-1">
+                          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
+                          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-100" />
+                          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-200" />
+                        </div>
                       </div>
                     </div>
                   </motion.div>
@@ -219,29 +294,15 @@ export function AgentChat({ agentName, agentType, initialPrompt = "" }: AgentCha
             </div>
           </div>
 
-          {/* Input Area */}
           <div className="bg-white dark:bg-slate-900 border-t border-gray-200 dark:border-slate-800 px-4 lg:px-6 py-4">
             <div className="max-w-4xl mx-auto">
-              <div className="relative">
-                <MessageCircle className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400 dark:text-slate-500 z-20" />
-                <InstagramBorder>
-                  <AnimatedInput
-                    placeholderTexts={placeholderTexts}
-                    value={inputValue}
-                    onChange={(e) => setInputValue(e.target.value)}
-                    onKeyPress={handleKeyPress}
-                    className="w-full h-12 pl-12 pr-24"
-                  />
-                </InstagramBorder>
-                <Button
-                  size="sm"
-                  onClick={() => handleSend(inputValue)}
-                  disabled={isLoading || !inputValue.trim()}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 p-0 rounded-full bg-azure-500 hover:bg-azure-600 transition-colors z-20"
-                >
-                  <Send className="h-4 w-4" />
-                </Button>
-              </div>
+              <AnimatedChatInput
+                value={inputValue}
+                onChange={(v) => setInputValue(v)}
+                onSubmit={() => handleSend(inputValue)}
+                placeholderTexts={placeholderTexts}
+                disabled={isLoading || !hasAzureOpenAI}
+              />
             </div>
           </div>
         </main>

@@ -10,10 +10,12 @@ import { RightSidebar } from "@/components/sidebar/RightSidebar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useOnboardingStore } from "@/store/onboardingStore";
-import { CheckCircle, Circle, RefreshCw, ArrowRight, Loader2 } from "lucide-react";
+import { CheckCircle, Circle, RefreshCw, ArrowRight, Loader2, AlertCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { TenantConnectForm } from "@/components/dashboard/TenantConnectForm";
 import { ConnectionAnimation } from "@/components/animations/ConnectionAnimation";
+import { apiService } from "@/services/api";
+import { useTenantDataStore } from "@/store/tenantDataStore";
 
 // Step 1 Cards - Create Service Principal
 const servicePrincipalCards = [
@@ -64,22 +66,19 @@ export default function OnboardingPage() {
   const [verifyingCard, setVerifyingCard] = useState<string | null>(null);
   const [isNavigating, setIsNavigating] = useState(false);
   const [showConnectionAnimation, setShowConnectionAnimation] = useState(false);
+  const tenantFetchAll = useTenantDataStore((s) => s.fetchAll);
   const [animationCompleted, setAnimationCompleted] = useState(false);
 
-  // Start animation when entering step 3
+  // Reset animation state when leaving/entering step 3
   useEffect(() => {
-    if (currentStep === 3) {
-      if (!animationCompleted) {
-        setShowConnectionAnimation(true);
-      }
-    } else {
-      // Reset animation state when leaving step 3
+    if (currentStep !== 3) {
       setShowConnectionAnimation(false);
       setAnimationCompleted(false);
-      // Reset resource sync when leaving step 3
-      updateResourceSync({ status: "syncing" });
+    } else if (resourceSync.status === "syncing") {
+      // Stale syncing state from previous attempt — reset to idle
+      updateResourceSync({ status: "idle" });
     }
-  }, [currentStep, animationCompleted, updateResourceSync]);
+  }, [currentStep, resourceSync.status, updateResourceSync]);
 
   // Calculate progress
   useEffect(() => {
@@ -148,17 +147,87 @@ export default function OnboardingPage() {
   };
 
   const handleSyncResources = async () => {
-    setShowConnectionAnimation(true);
+    setIsSyncing(true);
+    try {
+      // Start real Azure sync via backend
+      const res = await apiService.startSync("default");
+      if ((res as any)?.status === "failed") {
+        toast({
+          title: "Sync failed",
+          description: (res as any)?.message || "Failed to start sync",
+        });
+        setIsSyncing(false);
+        return;
+      }
+      // Show the connection animation while sync happens in background
+      setShowConnectionAnimation(true);
+    } catch {
+      setIsSyncing(false);
+      toast({
+        title: "Sync failed",
+        description: "Could not start resource sync. Check backend connection.",
+      });
+    }
   };
 
-  const handleConnectionAnimationComplete = () => {
+  const handleConnectionAnimationComplete = async () => {
     setShowConnectionAnimation(false);
     setAnimationCompleted(true);
-    updateResourceSync({ status: "completed" });
-    toast({
-      title: "Sync completed",
-      description: "All resources have been synced successfully",
-    });
+    // Poll sync status until completed or failed
+    let syncedCount = 0;
+    let attempts = 0;
+    const poll = async (): Promise<void> => {
+      try {
+        const status = await apiService.getSyncStatus("default");
+        const syncStatus = (status as any)?.status;
+        if (syncStatus === "completed" || syncStatus === "COMPLETED") {
+          syncedCount = (status as any)?.synced_resources ?? 0;
+          updateResourceSync({ status: "completed", lastSync: new Date().toISOString() } as any);
+          await tenantFetchAll();
+          toast({
+            title: "Sync completed",
+            description: `${syncedCount} resources synced successfully`,
+          });
+          return;
+        }
+        if (syncStatus === "failed" || syncStatus === "FAILED") {
+          updateResourceSync({ status: "failed" });
+        toast({
+          title: "Sync failed",
+          description: "Resource sync failed",
+        });
+          return;
+        }
+        if (syncStatus === "pending" || syncStatus === "PENDING") {
+          // Sync was never started – treat as failure
+          updateResourceSync({ status: "failed" });
+          toast({
+            title: "Sync failed",
+            description: "Sync was not started. Please try again.",
+          });
+          return;
+        }
+        if (attempts < 30) {
+          attempts++;
+          await new Promise(r => setTimeout(r, 2000));
+          return poll();
+        }
+        updateResourceSync({ status: "failed" });
+        toast({
+          title: "Sync timeout",
+          description: "Sync did not complete in time. Try again later.",
+        });
+      } catch {
+        if (attempts < 30) {
+          attempts++;
+          await new Promise(r => setTimeout(r, 2000));
+          return poll();
+        }
+        updateResourceSync({ status: "failed" });
+      }
+    };
+    await poll();
+    setIsSyncing(false);
   };
 
   const handleCompleteSync = () => {
@@ -169,11 +238,11 @@ export default function OnboardingPage() {
   const handleCompleteSetup = () => {
     setIsNavigating(true);
     completeStep(4);
+    localStorage.setItem("onboarding_completed", "true");
     toast({
       title: "Setup completed",
       description: "Welcome to Infralift! Redirecting to dashboard...",
     });
-    // Navigate to dashboard after a short delay
     setTimeout(() => {
       router.push("/dashboard");
     }, 1500);
@@ -272,6 +341,28 @@ export default function OnboardingPage() {
                       </Button>
                     </div>
                   )}
+
+                  {resourceSync.status === "failed" && (
+                    <div className="text-center py-10">
+                      <AlertCircle className="h-16 w-16 text-red-500 mx-auto mb-5" />
+                      <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+                        Sync Failed
+                      </h3>
+                      <p className="text-gray-600 dark:text-slate-400 mb-5 text-sm">
+                        Resource sync did not complete. Please try again.
+                      </p>
+                      <Button onClick={handleSyncResources} disabled={isSyncing} className="h-9 text-xs">
+                        {isSyncing ? (
+                          <>
+                            <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                            Syncing...
+                          </>
+                        ) : (
+                          "Retry Sync"
+                        )}
+                      </Button>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             )}
@@ -292,7 +383,7 @@ export default function OnboardingPage() {
                 </p>
                 <div className="grid grid-cols-2 gap-3 mb-6 max-w-sm mx-auto">
                   <div className="bg-gray-50 dark:bg-slate-900 rounded-lg p-4 border border-gray-100 dark:border-slate-800">
-                    <div className="text-2xl font-bold text-azure-500">150</div>
+                    <div className="text-2xl font-bold text-azure-500">{resourceSync.status === 'completed' ? (resourceSync as any).syncedCount ?? 0 : 0}</div>
                     <div className="text-xs text-gray-500 dark:text-slate-400 mt-1">Resources Synced</div>
                   </div>
                   <div className="bg-gray-50 dark:bg-slate-900 rounded-lg p-4 border border-gray-100 dark:border-slate-800">

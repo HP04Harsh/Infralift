@@ -17,48 +17,68 @@ services:
     restart: unless-stopped
 
   backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: myadmin12/infralift-backend:1.2.0
     container_name: infralift-backend
     ports:
       - "8001:8000"
     environment:
+      # Redis
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - DEBUG=True
+      - REDIS_DB=0
+      - REDIS_PASSWORD=
+      - REDIS_SESSION_TTL=86400
+
+      # App
+      - DEBUG=False
       - PYTHONUNBUFFERED=1
+      - API_V1_PREFIX=/api/v1
+      - BACKEND_CORS_ORIGINS=["http://localhost:3000","http://localhost:3001"]
+
+      # --- Azure Authentication (Required) ---
+      # Create a Service Principal in Azure AD:
+      #   az ad sp create-for-rbac --name "infralift-sp" --role Contributor --scopes /subscriptions/<sub-id>
+      - AZURE_CLIENT_ID=
+      - AZURE_CLIENT_SECRET=
+      - AZURE_TENANT_ID=
+      - AZURE_SUBSCRIPTION_ID=
+
+      # --- Azure OpenAI (Required for AI Chat) ---
+      # Deploy a model in Azure OpenAI Studio > Deployments > gpt-4 / gpt-35-turbo
+      - AZURE_OPENAI_ENDPOINT=
+      - AZURE_OPENAI_KEY=
+      - AZURE_OPENAI_DEPLOYMENT=
+      - AZURE_OPENAI_API_VERSION=2024-02-15-preview
+
+      # --- Azure Storage (Required for Terraform artifacts) ---
+      # Create a Storage Account + Container "terraform-artifacts"
+      - STORAGE_CONNECTION_STRING=
+      - STORAGE_CONTAINER_NAME=terraform-artifacts
+
+      # --- AI Provider ---
+      - AI_PROVIDER=azure-openai
     depends_on:
       redis:
         condition: service_healthy
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     networks:
       - infralift-network
     restart: unless-stopped
     volumes:
-      - ./backend:/app
-      - /app/__pycache__
-      - /app/.pytest_cache
+      - terraform_state:/app/terraform/state
 
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
+    image: myadmin12/infralift-frontend:1.2.0
     container_name: infralift-frontend
     ports:
       - "3001:3000"
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8001
-      - NODE_ENV=development
+      - NODE_ENV=production
     depends_on:
       - backend
     networks:
       - infralift-network
     restart: unless-stopped
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-      - /app/.next
 
 networks:
   infralift-network:
@@ -66,3 +86,4 @@ networks:
 
 volumes:
   redis_data:
+  terraform_state:

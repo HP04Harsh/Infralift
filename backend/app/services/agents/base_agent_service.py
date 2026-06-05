@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 class BaseAgentService:
     """Base service for all agent operations"""
     
-    def __init__(self, redis_client, azure_credentials=None):
+    def __init__(self, redis_client=None, azure_credentials=None):
         self.redis_client = redis_client
         self.azure_credentials = azure_credentials
         self.active_deployments = {}

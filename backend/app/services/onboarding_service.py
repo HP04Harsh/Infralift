@@ -105,8 +105,9 @@ class OnboardingService:
                 message=message
             )
         
-        # Update session with connection info
+        # Ensure session exists, then update with connection info
         session_id = f"session:{request.user_id}"
+        await self.get_or_create_session(request.user_id)
         await session_manager.update_session(
             session_id,
             {
@@ -194,9 +195,9 @@ class OnboardingService:
             session_data = await session_manager.get_session(session_id)
             
             if not self.azure_sync_service:
-                # Initialize sync service if not already done
-                from app.core.redis import redis_client
-                self.azure_sync_service = AzureSyncService(redis_client)
+                from app.core.redis import session_manager as sm
+                redis_c = sm.redis if sm.redis else await sm.connect()
+                self.azure_sync_service = AzureSyncService(redis_c)
             
             # Perform real Azure sync
             sync_result = await self.azure_sync_service.sync_tenant_resources(

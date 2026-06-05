@@ -1,10 +1,10 @@
 "use client";
 
 import { motion, AnimatePresence } from "framer-motion";
-import { X, BookOpen, Terminal, Key, Shield, CheckCircle, Copy, ExternalLink } from "lucide-react";
-import { cn, copyToClipboard } from "@/lib/utils";
-import { useToast } from "@/hooks/use-toast";
+import { X, BookOpen, Terminal, Key, Shield, CheckCircle, ExternalLink } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { CodeBlock } from "@/components/ui/CodeBlock";
 
 interface InfoModalProps {
   isOpen: boolean;
@@ -59,16 +59,6 @@ const sections = [
 ];
 
 export function InfoModal({ isOpen, onClose }: InfoModalProps) {
-  const { toast } = useToast();
-
-  const handleCopy = async (text: string) => {
-    const success = await copyToClipboard(text);
-    toast({
-      title: success ? "Copied to clipboard" : "Copy manually",
-      description: success ? "Command copied" : "Select and press Ctrl+C",
-    });
-  };
-
   return (
     <AnimatePresence>
       {isOpen && (
@@ -117,22 +107,11 @@ export function InfoModal({ isOpen, onClose }: InfoModalProps) {
                   )}
 
                   {"steps" in section && (
-                    <div className="space-y-2">
+                    <div className="space-y-3">
                       {(section as any).steps.map((step: any, i: number) => (
-                        <div key={i} className="bg-gray-50 dark:bg-slate-800/50 rounded-lg p-3 border border-gray-100 dark:border-slate-700/50">
+                        <div key={i}>
                           <p className="text-xs text-gray-500 dark:text-slate-400 mb-1.5">{step.desc}</p>
-                          <div className="relative flex items-center">
-                            <span className="text-xs text-gray-400 dark:text-slate-500 mr-2 font-mono">$</span>
-                            <code className="flex-1 text-xs font-mono text-gray-900 dark:text-gray-200 bg-gray-100 dark:bg-slate-800 rounded px-2 py-1 overflow-x-auto whitespace-nowrap">
-                              {step.cmd}
-                            </code>
-                            <button
-                              onClick={() => handleCopy(step.cmd)}
-                              className="ml-2 p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-                            >
-                              <Copy className="h-3 w-3" />
-                            </button>
-                          </div>
+                          <CodeBlock command={step.cmd} />
                         </div>
                       ))}
                     </div>

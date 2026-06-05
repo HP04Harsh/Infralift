@@ -52,8 +52,10 @@ export const AnimatedInput = forwardRef<HTMLInputElement, AnimatedInputProps>(
           {...props}
         />
         {!hasValue && !isFocused && (
-          <div className="absolute left-12 top-1/2 -translate-y-1/2 text-gray-400 dark:text-slate-500 pointer-events-none text-left">
-            <TypingText texts={placeholderTexts} />
+          <div className="absolute left-12 top-1/2 -translate-y-1/2 text-gray-400 dark:text-slate-500 pointer-events-none text-left max-w-[calc(100%-5rem)] overflow-hidden">
+            <div className="whitespace-nowrap overflow-hidden text-ellipsis">
+              <TypingText texts={placeholderTexts} />
+            </div>
           </div>
         )}
       </div>

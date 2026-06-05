@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useUserStore } from "@/store/userStore";
+import { useUserStore, type UserRole } from "@/store/userStore";
 import { UserPlus, Edit, Trash2, Shield, Eye, EyeOff } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useToast } from "@/hooks/use-toast";
@@ -19,7 +19,8 @@ export function UserManagement() {
   const [formData, setFormData] = useState({
     username: '',
     password: '',
-    role: 'reader' as 'admin' | 'reader',
+    role: 'reader' as UserRole,
+    email: '',
   });
 
   const handleCreateUser = (e: React.FormEvent) => {
@@ -46,6 +47,7 @@ export function UserManagement() {
       username: formData.username,
       password: formData.password,
       role: formData.role,
+      email: formData.email,
     });
 
     toast({
@@ -53,7 +55,7 @@ export function UserManagement() {
       description: `User ${formData.username} has been created successfully`,
     });
 
-    setFormData({ username: '', password: '', role: 'reader' });
+    setFormData({ username: '', password: '', role: 'reader', email: '' });
     setShowCreateForm(false);
   };
 
@@ -66,6 +68,7 @@ export function UserManagement() {
       username: formData.username,
       password: formData.password,
       role: formData.role,
+      email: formData.email,
     });
 
     toast({
@@ -73,7 +76,7 @@ export function UserManagement() {
       description: `User ${formData.username} has been updated successfully`,
     });
 
-    setFormData({ username: '', password: '', role: 'reader' });
+    setFormData({ username: '', password: '', role: 'reader', email: '' });
     setEditingUser(null);
   };
 
@@ -101,12 +104,13 @@ export function UserManagement() {
       username: user.username,
       password: user.password,
       role: user.role,
+      email: user.email || '',
     });
     setShowCreateForm(true);
   };
 
   const handleCancel = () => {
-    setFormData({ username: '', password: '', role: 'reader' });
+    setFormData({ username: '', password: '', role: 'reader', email: '' });
     setEditingUser(null);
     setShowCreateForm(false);
   };
@@ -161,10 +165,18 @@ export function UserManagement() {
                       <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
                         user.role === 'admin' 
                           ? 'bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300' 
+                          : user.role === 'portal_admin'
+                          ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300'
+                          : user.role === 'global_engineer'
+                          ? 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-300'
+                          : user.role === 'itsm_engineer'
+                          ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300'
+                          : user.role === 'developer'
+                          ? 'bg-pink-100 text-pink-800 dark:bg-pink-900/40 dark:text-pink-300'
                           : 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300'
                       }`}>
                         <Shield className="h-3 w-3 mr-1" />
-                        {user.role}
+                        {user.role.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-600 dark:text-slate-400">
@@ -261,17 +273,35 @@ export function UserManagement() {
                   </div>
 
                   <div className="space-y-2">
+                    <Label htmlFor="email" className="text-xs font-medium text-gray-700 dark:text-slate-300">
+                      Email
+                    </Label>
+                    <Input
+                      id="email"
+                      type="email"
+                      value={formData.email}
+                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                      placeholder="Enter email address"
+                      className="dark:bg-slate-900 dark:border-slate-600 dark:text-white h-9 text-xs"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
                     <Label htmlFor="role" className="text-xs font-medium text-gray-700 dark:text-slate-300">
                       Role
                     </Label>
                     <select
                       id="role"
                       value={formData.role}
-                      onChange={(e) => setFormData({ ...formData, role: e.target.value as 'admin' | 'reader' })}
+                      onChange={(e) => setFormData({ ...formData, role: e.target.value as UserRole })}
                       className="w-full px-3 py-2 text-xs border border-gray-300 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-azure-500 focus:border-transparent dark:bg-slate-900 dark:text-white h-9"
                     >
                       <option value="reader">Reader</option>
                       <option value="admin">Admin</option>
+                      <option value="portal_admin">Portal Admin</option>
+                      <option value="global_engineer">Global Engineer</option>
+                      <option value="itsm_engineer">ITSM Engineer</option>
+                      <option value="developer">Developer</option>
                     </select>
                   </div>
 

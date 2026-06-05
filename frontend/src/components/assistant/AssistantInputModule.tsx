@@ -22,8 +22,10 @@ interface AssistantInputModuleProps {
   quickActions: QuickAction[];
   placeholderVariants: string[];
   className?: string;
-  agentType?: string; // 'provisioning', 'assessment', etc.
+  agentType?: string;
   onSubmit?: (value: string) => void;
+  value?: string;
+  onValueChange?: (value: string) => void;
 }
 
 export function AssistantInputModule({
@@ -34,33 +36,35 @@ export function AssistantInputModule({
   className,
   agentType,
   onSubmit,
+  value: externalValue,
+  onValueChange,
 }: AssistantInputModuleProps) {
   const router = useRouter();
-  const [inputValue, setInputValue] = useState("");
+  const [internalValue, setInternalValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const inputValue = externalValue !== undefined ? externalValue : internalValue;
+  const updateValue = (val: string) => {
+    if (onValueChange) onValueChange(val);
+    else setInternalValue(val);
+  };
+
   const handleQuickAction = (prompt: string) => {
-    if (agentType) {
-      // Navigate to the agent's chat page with the prompt pre-populated
-      router.push(`/${agentType}/chat?prompt=${encodeURIComponent(prompt)}`);
-    } else {
-      setInputValue(prompt);
-      setTimeout(() => {
-        inputRef.current?.focus();
-        inputRef.current?.setSelectionRange(prompt.length, prompt.length);
-      }, 100);
-    }
+    updateValue(prompt);
+    setTimeout(() => {
+      inputRef.current?.focus();
+      inputRef.current?.setSelectionRange(prompt.length, prompt.length);
+    }, 100);
   };
 
   const handleSubmit = () => {
-    if (inputValue.trim()) {
+    const value = inputValue.trim();
+    if (value) {
+      updateValue("");
+      onSubmit?.(value);
       if (agentType) {
-        // Navigate to the agent's chat page with the prompt pre-populated
-        router.push(`/${agentType}/chat?prompt=${encodeURIComponent(inputValue)}`);
-      } else {
-        onSubmit?.(inputValue);
+        router.push(`/${agentType}/chat?prompt=${encodeURIComponent(value)}`);
       }
-      setInputValue("");
     }
   };
 
@@ -90,7 +94,7 @@ export function AssistantInputModule({
             <AnimatedInput
               ref={inputRef}
               value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
+              onChange={(e) => updateValue(e.target.value)}
               onKeyPress={handleKeyPress}
               placeholderTexts={placeholderVariants}
               className="h-16 pr-14 rounded-2xl text-base text-left bg-transparent"

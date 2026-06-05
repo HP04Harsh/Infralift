@@ -5,7 +5,7 @@ metadata:
   namespace: default
   labels:
     app: infralift-backend
-    version: v1.1.0
+    version: v1.2.0
 spec:
   replicas: 5
   selector:
@@ -15,11 +15,11 @@ spec:
     metadata:
       labels:
         app: infralift-backend
-        version: v1.1.0
+        version: v1.2.0
     spec:
       containers:
       - name: backend
-        image: myadmin12/infralift-backend:latest
+        image: myadmin12/infralift-backend:1.2.0
         imagePullPolicy: Always
         ports:
         - containerPort: 8000

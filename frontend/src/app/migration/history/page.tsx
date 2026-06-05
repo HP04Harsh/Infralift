@@ -12,6 +12,7 @@ import {
   CheckCircle, Activity, XCircle, Clock, ChevronLeft, ChevronRight
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useMigrationStore } from "@/store/migrationStore";
 
 type Migration = {
   name: string;
@@ -21,21 +22,6 @@ type Migration = {
   duration: string;
   initiatedBy: string;
 };
-
-const mockMigrations: Migration[] = [
-  { name: "prod-web-servers", type: "Lift & Shift", status: "completed", dateTime: "2026-05-28 14:00", duration: "3h 12m", initiatedBy: "Harsh Pardhi" },
-  { name: "customer-db-migrate", type: "Database Migration", status: "in-progress", dateTime: "2026-05-28 09:30", duration: "5h 45m", initiatedBy: "Priya Sharma" },
-  { name: "legacy-app-replatform", type: "Replatform", status: "completed", dateTime: "2026-05-27 16:00", duration: "2h 30m", initiatedBy: "Rahul Verma" },
-  { name: "file-server-storage", type: "Storage Migration", status: "completed", dateTime: "2026-05-27 11:20", duration: "4h 15m", initiatedBy: "Ananya Gupta" },
-  { name: "hr-app-service", type: "App Migration", status: "completed", dateTime: "2026-05-26 18:00", duration: "1h 45m", initiatedBy: "Vikram Singh" },
-  { name: "vnet-hub-migration", type: "Network Migration", status: "completed", dateTime: "2026-05-26 14:30", duration: "6h 00m", initiatedBy: "Harsh Pardhi" },
-  { name: "docker-app-aks", type: "Container Migration", status: "in-progress", dateTime: "2026-05-26 10:00", duration: "8h 20m", initiatedBy: "Priya Sharma" },
-  { name: "sql-server-2022", type: "Lift & Shift", status: "failed", dateTime: "2026-05-25 15:45", duration: "2h 10m", initiatedBy: "Rahul Verma" },
-  { name: "on-prem-filesync", type: "Hybrid Setup", status: "completed", dateTime: "2026-05-25 09:00", duration: "3h 30m", initiatedBy: "Ananya Gupta" },
-  { name: "oracle-to-postgres", type: "Database Migration", status: "planned", dateTime: "2026-05-30 08:00", duration: "-", initiatedBy: "Harsh Pardhi" },
-  { name: "ecommerce-app", type: "Replatform", status: "planned", dateTime: "2026-06-01 09:00", duration: "-", initiatedBy: "Vikram Singh" },
-  { name: "backup-storage-migrate", type: "Storage Migration", status: "completed", dateTime: "2026-05-24 12:00", duration: "5h 00m", initiatedBy: "Priya Sharma" },
-];
 
 const typeIcons: Record<string, { icon: React.ReactNode; color: string }> = {
   "Lift & Shift": { icon: <Server className="h-4 w-4" />, color: "text-blue-500" },
@@ -62,6 +48,8 @@ type SortDir = "asc" | "desc";
 
 export default function MigrationHistoryPage() {
   const router = useRouter();
+  const storedMigrations = useMigrationStore((s) => s.migrations);
+  const [migrationList, setMigrationList] = useState<Migration[]>([]);
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("dateTime");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -79,15 +67,21 @@ export default function MigrationHistoryPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  useEffect(() => {
+    if (storedMigrations.length > 0) {
+      setMigrationList(storedMigrations);
+    }
+  }, [storedMigrations]);
+
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
-    return mockMigrations.filter((m) =>
+    return migrationList.filter((m) =>
       m.name.toLowerCase().includes(q) ||
       m.type.toLowerCase().includes(q) ||
       m.status.toLowerCase().includes(q) ||
       m.initiatedBy.toLowerCase().includes(q)
     );
-  }, [search]);
+  }, [search, migrationList]);
 
   const sorted = useMemo(() => {
     return [...filtered].sort((a, b) => {
@@ -113,8 +107,20 @@ export default function MigrationHistoryPage() {
 
   const handleExport = (format: string) => {
     setExportOpen(false);
-    console.log(`Exporting migration history as ${format}...`);
-    alert(`Simulating download of migration history as ${format}`);
+    if (format === "CSV") {
+      const headers = ["Migration Name", "Type", "Status", "Date/Time", "Duration", "Initiated By"];
+      const rows = sorted.map((m) => [m.name, m.type, m.status, m.dateTime, m.duration, m.initiatedBy]);
+      const csv = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `migrations_${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } else {
+      alert(`Export as ${format} coming soon`);
+    }
   };
 
   const SortHeader = ({ column, label }: { column: SortKey; label: string }) => (

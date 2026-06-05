@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.redis import session_manager
-from app.api.v1 import onboarding, auth, resources
+from app.api.v1 import onboarding, auth, resources, ai, itsm, deployments
 
 
 app = FastAPI(
@@ -41,6 +41,24 @@ app.include_router(
     resources.router,
     prefix=f"{settings.API_V1_PREFIX}/resources",
     tags=["resources"]
+)
+
+app.include_router(
+    ai.router,
+    prefix=f"{settings.API_V1_PREFIX}/ai",
+    tags=["ai"]
+)
+
+app.include_router(
+    itsm.router,
+    prefix=f"{settings.API_V1_PREFIX}/itsm",
+    tags=["itsm"]
+)
+
+app.include_router(
+    deployments.router,
+    prefix=f"{settings.API_V1_PREFIX}/deployments",
+    tags=["deployments"]
 )
 
 

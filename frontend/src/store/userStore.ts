@@ -1,15 +1,18 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
+export type UserRole = 'admin' | 'reader' | 'itsm_engineer' | 'portal_admin' | 'global_engineer' | 'developer';
+
 export interface User {
   id: string;
   username: string;
   password: string;
-  role: 'admin' | 'reader';
+  role: UserRole;
   createdAt: string;
   mobile?: string;
   city?: string;
   reason?: string;
+  email?: string;
 }
 
 export interface UserState {

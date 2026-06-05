@@ -41,18 +41,29 @@ export default function LandingPage() {
     const user = authenticateUser(formData.username, formData.password);
     
     if (user) {
-      // Store auth token
       localStorage.setItem('auth_token', `mock-token-${user.id}`);
       localStorage.setItem('user_role', user.role);
       localStorage.setItem('user_name', user.username);
       localStorage.setItem('user_id', user.id);
       
-      // Check if onboarding is completed
+      // Track login activity
+      const platform = navigator.userAgent.includes('Chrome') ? 'Chrome' : navigator.userAgent.includes('Firefox') ? 'Firefox' : navigator.userAgent.includes('Safari') ? 'Safari' : 'Unknown';
+      const os = navigator.userAgent.includes('Windows') ? 'Windows' : navigator.userAgent.includes('Mac') ? 'Mac' : navigator.userAgent.includes('Linux') ? 'Linux' : 'Unknown';
+      const loginRecord = {
+        time: new Date().toLocaleString(),
+        platform: `${platform} on ${os}`,
+        location: formData.city || 'Unknown',
+        ip: '127.0.0.1',
+      };
+      const existing = JSON.parse(localStorage.getItem('login_activities') || '[]');
+      existing.unshift(loginRecord);
+      if (existing.length > 10) existing.length = 10;
+      localStorage.setItem('login_activities', JSON.stringify(existing));
+      
       const onboardingCompleted = localStorage.getItem('onboarding_completed') === 'true';
       if (onboardingCompleted) {
         router.push('/dashboard');
       } else {
-        // Reset onboarding state to start fresh
         localStorage.removeItem('infralift-onboarding-storage');
         router.push('/onboarding');
       }
@@ -178,7 +189,10 @@ export default function LandingPage() {
                 className="text-center mb-6"
               >
                 <div className="w-16 h-16 mx-auto mb-4 bg-gradient-to-br from-azure-500 to-purple-500 rounded-2xl flex items-center justify-center shadow-lg shadow-azure-500/30">
-                  <Cloud className="h-8 w-8 text-white" />
+                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="12" cy="12" r="12" fill="white" />
+                    <path d="M12 5C9.58 5 7.45 6.54 6.55 8.68C4.47 8.9 2.8 10.6 2.8 12.7C2.8 14.97 4.63 16.8 6.9 16.8H17.8C19.68 16.8 21.2 15.28 21.2 13.4C21.2 11.68 19.92 10.26 18.26 10.02C17.72 7.18 15.14 5 12 5Z" fill="#0078D4" />
+                  </svg>
                 </div>
                 <h1 className="text-3xl font-bold text-white mb-2">Infralift</h1>
                 <p className="text-gray-300 text-sm">Azure Infrastructure Automation Platform</p>

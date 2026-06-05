@@ -1,6 +1,6 @@
 "use client";
 
-import { Search, Settings, ChevronRight, Menu, X } from "lucide-react";
+import { Search, Settings, ChevronRight, Menu, X, BookOpen, Activity } from "lucide-react";
 import { useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { useOnboardingStore } from "@/store/onboardingStore";
@@ -22,8 +22,12 @@ export function Sidebar() {
   const router = useRouter();
   const pathname = usePathname();
   const [searchQuery, setSearchQuery] = useState("");
-  const { general, customization } = useSettingsStore();
+  const { general, customization, appearance } = useSettingsStore();
   const [isOpen, setIsOpen] = useState(false);
+  
+  const userRole = typeof window !== 'undefined' ? localStorage.getItem('user_role') : null;
+  const canViewMonitoring = userRole !== 'reader' && userRole !== 'itsm_engineer';
+  const sidebarWidth = appearance.compactSidebar ? "w-[180px]" : "w-[240px]";
 
   // Determine active agent based on current pathname
   const activeAgent = infrastructureAgents.find(agent => agent.path === pathname)?.name || "Provisioning Agent";
@@ -56,7 +60,7 @@ export function Sidebar() {
 
       <aside
         className={cn(
-          "w-[240px] bg-gray-900 text-white flex flex-col h-screen fixed left-0 top-0 transition-transform transform z-50",
+          sidebarWidth, "bg-gray-900 text-white flex flex-col h-screen fixed left-0 top-0 transition-all transform z-50",
           isOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
         )}
       >
@@ -145,6 +149,39 @@ export function Sidebar() {
               </button>
             ))}
           </nav>
+
+          {/* Portal Section */}
+          <h2 className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-3 mt-5">
+            Portal
+          </h2>
+          <nav className="space-y-0.5">
+            <button
+              onClick={() => router.push("/portal/setup-guide")}
+              className={cn(
+                "w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-xs transition-all group",
+                pathname === "/portal/setup-guide"
+                  ? "bg-azure-600 text-white"
+                  : "text-gray-300 hover:bg-gray-800 hover:text-white"
+              )}
+            >
+              <BookOpen className="h-3.5 w-3.5 flex-shrink-0" />
+              <span className="flex-1 text-left">Setup Guide</span>
+            </button>
+            {canViewMonitoring && (
+              <button
+                onClick={() => router.push("/portal/monitoring")}
+                className={cn(
+                  "w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-xs transition-all group",
+                  pathname === "/portal/monitoring"
+                    ? "bg-azure-600 text-white"
+                    : "text-gray-300 hover:bg-gray-800 hover:text-white"
+                )}
+              >
+                <Activity className="h-3.5 w-3.5 flex-shrink-0" />
+                <span className="flex-1 text-left">Monitoring</span>
+              </button>
+            )}
+          </nav>
         </div>
 
         {/* Settings */}
@@ -169,9 +206,7 @@ export function Sidebar() {
             <p className="text-[10px] text-gray-500 font-medium">
               2026 @ InfraLift LLP
             </p>
-            <p className="text-[9px] text-gray-600">
-              All rights reserved
-            </p>
+
           </div>
         </div>
       </aside>

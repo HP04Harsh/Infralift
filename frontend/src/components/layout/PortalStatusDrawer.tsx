@@ -2,10 +2,11 @@
 
 import { useRef, useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Server, Activity, Cpu, Database, Globe, RefreshCw, Wifi, Shield, CheckCircle, AlertTriangle, XCircle, Zap } from "lucide-react";
+import { X, Server, Activity, Cpu, Database, Globe, RefreshCw, Wifi, Shield, CheckCircle, AlertTriangle, XCircle, Zap, BarChart3 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useUptimeStore } from "@/store/uptimeStore";
+import { useRouter } from "next/navigation";
 
 interface PortalStatusDrawerProps {
   isOpen: boolean;
@@ -29,6 +30,7 @@ interface Metric {
 
 export function PortalStatusDrawer({ isOpen, onClose }: PortalStatusDrawerProps) {
   const drawerRef = useRef<HTMLDivElement>(null);
+  const router = useRouter();
   const { getUptime, isHealthy, setHealthStatus } = useUptimeStore();
   const [isFixing, setIsFixing] = useState(false);
   const [fixLog, setFixLog] = useState<string[]>([]);
@@ -273,7 +275,7 @@ export function PortalStatusDrawer({ isOpen, onClose }: PortalStatusDrawerProps)
               )}
             </div>
 
-            <div className="p-3 border-t border-gray-200/50 dark:border-slate-800/50">
+            <div className="p-3 border-t border-gray-200/50 dark:border-slate-800/50 space-y-2">
               <div className="flex items-center justify-between text-xs text-gray-500 dark:text-slate-400">
                 <span>Portal Uptime: {getUptime()}</span>
                 <span className={cn("flex items-center gap-1", isHealthy ? "text-emerald-500" : "text-amber-500")}>
@@ -281,6 +283,15 @@ export function PortalStatusDrawer({ isOpen, onClose }: PortalStatusDrawerProps)
                   {isHealthy ? "Healthy" : "Degraded"}
                 </span>
               </div>
+              <Button
+                onClick={() => { onClose(); router.push("/portal/monitoring"); }}
+                size="sm"
+                className="w-full h-7 text-xs"
+                variant="outline"
+              >
+                <BarChart3 className="h-3 w-3 mr-1" />
+                View Full Dashboard
+              </Button>
             </div>
           </motion.div>
         </>

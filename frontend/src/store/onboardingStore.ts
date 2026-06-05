@@ -4,6 +4,9 @@ import { persist } from 'zustand/middleware';
 export interface OnboardingData {
   tenantId?: string;
   subscriptionId?: string;
+  clientId?: string;
+  clientSecret?: string;
+  environmentName?: string;
   resourceGroup?: string;
   region?: string;
   assignmentName?: string;
@@ -37,6 +40,9 @@ export interface OnboardingState {
   verifyCard: (cardId: string) => void;
   setTenantId: (tenantId: string) => void;
   setSubscriptionId: (subscriptionId: string) => void;
+  setClientId: (clientId: string) => void;
+  setClientSecret: (clientSecret: string) => void;
+  setEnvironmentName: (name: string) => void;
   updateResourceSync: (sync: Partial<OnboardingState['resourceSync']>) => void;
 }
 
@@ -119,6 +125,21 @@ export const useOnboardingStore = create<OnboardingState>()(
       setSubscriptionId: (subscriptionId) =>
         set((state) => ({
           onboardingData: { ...state.onboardingData, subscriptionId },
+        })),
+
+      setClientId: (clientId) =>
+        set((state) => ({
+          onboardingData: { ...state.onboardingData, clientId },
+        })),
+
+      setClientSecret: (clientSecret) =>
+        set((state) => ({
+          onboardingData: { ...state.onboardingData, clientSecret },
+        })),
+
+      setEnvironmentName: (environmentName) =>
+        set((state) => ({
+          onboardingData: { ...state.onboardingData, environmentName },
         })),
 
       updateResourceSync: (syncData) =>

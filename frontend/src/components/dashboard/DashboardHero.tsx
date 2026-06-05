@@ -1,25 +1,17 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { useRouter } from "next/navigation";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Send, MessageCircle, Sparkles } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { TypingText } from "@/components/ui/typing-text";
+import { Sparkles } from "lucide-react";
 import { RGBText } from "@/components/ui/rgb-text";
-import { InstagramBorder } from "@/components/ui/instagram-border";
-import { AnimatedInput } from "@/components/ui/animated-input";
+import { AnimatedGradientChatInput } from "@/components/assistant/AnimatedGradientChatInput";
 
 interface DashboardHeroProps {
   userName?: string;
 }
 
 export function DashboardHero({ userName = "Harsh Pardhi" }: DashboardHeroProps) {
-  const router = useRouter();
   const [greeting, setGreeting] = useState("");
-  const [inputValue, setInputValue] = useState("");
 
   // Dynamic IST-based greeting
   useEffect(() => {
@@ -75,24 +67,6 @@ export function DashboardHero({ userName = "Harsh Pardhi" }: DashboardHeroProps)
     "What would you like to build?",
   ];
 
-  const handleQuickAction = (prompt: string) => {
-    setInputValue(prompt);
-  };
-
-  const handleSend = () => {
-    if (inputValue.trim()) {
-      // Navigate to dashboard chat with the prompt
-      router.push(`/dashboard/chat?prompt=${encodeURIComponent(inputValue)}`);
-    }
-  };
-
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
-
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -137,61 +111,19 @@ export function DashboardHero({ userName = "Harsh Pardhi" }: DashboardHeroProps)
           </div>
         </motion.div>
 
-        {/* AI Input Box with Chat Icon */}
+        {/* AI Input Box with Animated Gradient Border */}
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: 0.4 }}
-          className="max-w-2xl mx-auto mb-4"
+          className="max-w-2xl mx-auto"
         >
-          <div className="relative">
-            <MessageCircle className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400 dark:text-slate-500 z-20" />
-            <InstagramBorder>
-              <AnimatedInput
-                placeholderTexts={placeholderTexts}
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-                onKeyPress={handleKeyPress}
-                className="w-full h-12 pl-12 pr-24"
-              />
-            </InstagramBorder>
-            <Button
-              size="sm"
-              onClick={handleSend}
-              className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 p-0 rounded-full bg-azure-500 hover:bg-azure-600 transition-colors z-20"
-            >
-              <Send className="h-4 w-4" />
-            </Button>
-          </div>
-        </motion.div>
-
-        {/* Quick Action Chips */}
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.5 }}
-          className="flex flex-wrap justify-center gap-2"
-        >
-          {quickActions.map((action, index) => (
-            <motion.button
-              key={index}
-              onClick={() => handleQuickAction(action.prompt)}
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              className={cn(
-                "px-4 py-2 text-xs font-medium rounded-full border transition-all",
-                "bg-white dark:bg-slate-900",
-                "border-gray-300 dark:border-slate-600",
-                "text-gray-700 dark:text-slate-300",
-                "hover:bg-gray-50 dark:hover:bg-slate-800",
-                "hover:border-gray-400 dark:hover:border-slate-500",
-                "hover:text-gray-900 dark:hover:text-white",
-                "hover:shadow-sm"
-              )}
-            >
-              {action.label}
-            </motion.button>
-          ))}
+          <AnimatedGradientChatInput
+            simple
+            quickActions={quickActions}
+            placeholderVariants={placeholderTexts}
+            agentType="dashboard"
+          />
         </motion.div>
       </div>
     </motion.div>

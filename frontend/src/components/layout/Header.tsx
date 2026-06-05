@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { User, Bell, Info } from "lucide-react";
+import { User, Bell, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUptimeStore } from "@/store/uptimeStore";
 import { useNotificationStore } from "@/store/notificationStore";
@@ -10,7 +10,8 @@ import { NotificationDrawer } from "./NotificationDrawer";
 import { ProfileDropdown } from "./ProfileDropdown";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { PortalStatusDrawer } from "./PortalStatusDrawer";
-import { InfoModal } from "./InfoModal";
+import { SetupGuideDrawer } from "./SetupGuideDrawer";
+import { useTenantDataStore } from "@/store/tenantDataStore";
 
 interface HeaderProps {
   userName?: string;
@@ -22,21 +23,23 @@ export function Header({ userName = "Harsh Pardhi", showLiveIndicator = true }: 
   const [showNotifications, setShowNotifications] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showPortalStatus, setShowPortalStatus] = useState(false);
-  const [showInfo, setShowInfo] = useState(false);
+  const [showSetupGuide, setShowSetupGuide] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const { getUptime, isHealthy } = useUptimeStore();
   const { getUnreadCount } = useNotificationStore();
   const { general, customization } = useSettingsStore();
   const unreadCount = getUnreadCount();
+  const resync = useTenantDataStore((s) => s.resync);
+  const lastSync = useTenantDataStore((s) => s.lastSync);
   
   // Get user role from localStorage
   const userRole = typeof window !== 'undefined' ? localStorage.getItem('user_role') : null;
 
-  // Update uptime every minute
   useEffect(() => {
     setUptime(getUptime());
     const interval = setInterval(() => {
       setUptime(getUptime());
-    }, 60000); // Update every minute
+    }, 1000);
     
     return () => clearInterval(interval);
   }, [getUptime]);
@@ -99,12 +102,23 @@ export function Header({ userName = "Harsh Pardhi", showLiveIndicator = true }: 
             </span>
             <span className="text-xs text-gray-400 dark:text-slate-500">|</span>
             <button
-              onClick={() => setShowInfo(true)}
-              className="p-1 text-gray-400 hover:text-azure-500 dark:hover:text-azure-400 transition-colors rounded-full hover:bg-gray-100 dark:hover:bg-slate-800"
-              title="Setup Guide"
+              onClick={async () => {
+                setSyncing(true);
+                await resync();
+                setSyncing(false);
+              }}
+              disabled={syncing}
+              className="p-1 text-gray-400 hover:text-emerald-500 dark:hover:text-emerald-400 transition-colors rounded-full hover:bg-gray-100 dark:hover:bg-slate-800 flex items-center gap-1 disabled:opacity-50"
+              title={syncing ? "Syncing..." : "Resync all tenant data"}
             >
-              <Info className="h-3.5 w-3.5" />
+              <RefreshCw className={`h-3 w-3 ${syncing ? "animate-spin" : ""}`} />
+              <span className="text-[10px] font-medium">{syncing ? "Syncing..." : "Resync"}</span>
             </button>
+            {lastSync && !syncing && (
+              <span className="text-[9px] text-gray-500 dark:text-slate-500" title={lastSync}>
+                Synced
+              </span>
+            )}
           </div>
         )}
       </div>
@@ -138,8 +152,8 @@ export function Header({ userName = "Harsh Pardhi", showLiveIndicator = true }: 
       {/* Portal Status Drawer */}
       <PortalStatusDrawer isOpen={showPortalStatus} onClose={() => setShowPortalStatus(false)} />
 
-      {/* Info Modal */}
-      <InfoModal isOpen={showInfo} onClose={() => setShowInfo(false)} />
+      {/* Setup Guide Drawer */}
+      <SetupGuideDrawer isOpen={showSetupGuide} onClose={() => setShowSetupGuide(false)} />
       
       {/* Profile Dropdown */}
       <ProfileDropdown userName={userName} isOpen={showProfile} onClose={() => setShowProfile(false)} />

@@ -1,12 +1,13 @@
 "use client";
 
-import { Suspense } from "react";
+import { Suspense, useMemo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { AgentLayout } from "@/components/layout/AgentLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { useTenantDataStore } from "@/store/tenantDataStore";
 import {
   AlertTriangle,
   Shield,
@@ -18,16 +19,19 @@ import {
   DollarSign,
   Target,
   FileWarning,
-  ExternalLink,
   ChevronRight,
   Clock,
   MapPin,
+  Scale,
+  Lock,
+  CheckCircle,
 } from "lucide-react";
 
 interface ViolationData {
-  id: number;
+  id: string;
   policy: string;
   resource: string;
+  resourceType: string;
   severity: string;
   status: string;
   location: string;
@@ -35,90 +39,8 @@ interface ViolationData {
   impact: string;
   costImpact: string;
   steps: string[];
+  category: string;
 }
-
-const violations: ViolationData[] = [
-  {
-    id: 1,
-    policy: "Storage Account Encryption Disabled",
-    resource: "prod-storage-001",
-    severity: "High",
-    status: "Open",
-    location: "East US / prod-rg",
-    description:
-      "The storage account prod-storage-001 does not have Azure Storage Service Encryption (SSE) enabled for data at rest. All data written to this account is stored without encryption, exposing sensitive customer data and application logs to potential unauthorized access if the physical media is compromised.",
-    impact:
-      "Without encryption at rest, the organization risks data exposure during a physical breach or media disposal. Regulatory frameworks including HIPAA, PCI-DSS, and GDPR mandate encryption of data at rest. Non-compliance could result in fines up to 4% of annual revenue. Additionally, any existing or future certification audits will flag this as a critical finding, potentially delaying certification timelines.",
-    costImpact:
-      "Enabling SSE incurs no additional cost as Azure provides this feature free of charge. However, the risk of a data breach is estimated at $4.45M per incident (IBM Cost of Data Breach 2024). Remediation cost: $0. Opportunity cost of inaction: potential regulatory fines of $50K\u2013$500K per violation depending on jurisdiction.",
-    steps: [
-      "Navigate to the Azure Portal and select the storage account prod-storage-001",
-      "Go to Settings > Configuration and enable 'Azure Storage Service Encryption'",
-      "Select the encryption type (Microsoft-managed keys recommended) and save the changes",
-      "Verify the encryption status by checking the 'Encryption' blade shows 'Enabled' and run a test upload to confirm",
-    ],
-  },
-  {
-    id: 2,
-    policy: "SQL Database Auditing Disabled",
-    resource: "sql-cluster-01",
-    severity: "Medium",
-    status: "In Progress",
-    location: "West Europe / sql-rg",
-    description:
-      "The Azure SQL Database instance sql-cluster-01 has auditing disabled. Database auditing tracks all database events and writes them to an audit log in your Azure Storage account. Without auditing, the organization cannot detect anomalous access patterns, unauthorized schema changes, or data exfiltration attempts in a timely manner.",
-    impact:
-      "Absence of database auditing severely limits the security team's ability to perform forensic analysis after a security incident. Mean time to detect (MTTD) increases significantly, as manual log investigation is required. Compliance frameworks like SOC 2, PCI-DSS (requirement 10), and HIPAA ($164.312(b)) require audit controls. Continued non-compliance threatens the existing SOC 2 Type II certification.",
-    costImpact:
-      "Azure SQL Auditing costs approximately $0.025/GB for audit log storage. For this workload, estimated monthly cost: $5\u2013$15. The cost of a single security incident going undetected for an extended period is estimated at $200K\u2013$2M. Remediation cost: ~$15/month. A 30-day audit log retention window is recommended at minimal cost.",
-    steps: [
-      "Open the SQL database sql-cluster-01 in the Azure Portal and go to the 'Auditing' blade",
-      "Toggle 'Enable Azure SQL Auditing' to On and select a storage account for audit logs",
-      "Configure the retention period (minimum 90 days recommended for compliance) and define the events to log",
-      "Save the configuration and verify by querying the sys.dm_audit_actions view for active audit trails",
-    ],
-  },
-  {
-    id: 3,
-    policy: "VM Network Security Group Misconfigured",
-    resource: "web-server-002",
-    severity: "High",
-    status: "Open",
-    location: "Southeast Asia / web-rg",
-    description:
-      "The Network Security Group (NSG) attached to web-server-002 contains an overly permissive inbound rule allowing RDP (port 3389) access from the Internet (0.0.0.0/0). This configuration exposes the virtual machine to brute-force attacks, credential theft, and potential remote exploitation by threat actors scanning for open RDP ports.",
-    impact:
-      "Open RDP to the internet is one of the most common attack vectors observed in cloud environments. Automated scanning tools can detect this within hours. If compromised, the VM can be used as a pivot point to access other resources in the virtual network. This violation also violates the Azure Security Benchmark (NS-1) and CIS Control 4.1.",
-    costImpact:
-      "Fixing this requires zero infrastructure cost\u2014only configuration changes. The potential cost of a VM compromise includes data exfiltration, lateral movement cleanup, and downtime. Average cost of a ransomware attack originating from exposed RDP: $1.85M. Justified Azure Bastion Host cost: ~$150/month as a secure alternative.",
-    steps: [
-      "In the Azure Portal, navigate to the NSG attached to web-server-002's subnet or NIC",
-      "Locate the inbound rule allowing port 3389 from Any/Internet and edit it",
-      "Change the Source to 'IP Addresses' and specify your authorized public IP or set up Azure Bastion for JIT access",
-      "Test connectivity via the authorized method only, then monitor NSG flow logs for any denied RDP attempts",
-    ],
-  },
-  {
-    id: 4,
-    policy: "Key Vault Soft Delete Disabled",
-    resource: "keyvault-prod",
-    severity: "Medium",
-    status: "Resolved",
-    location: "East US 2 / security-rg",
-    description:
-      "The Key Vault instance keyvault-prod previously had soft-delete and purge protection disabled. Soft-delete allows recovery of deleted secrets, keys, and certificates for a configurable retention period. Without it, any accidental or malicious deletion results in permanent loss of cryptographic material, causing service outages and data encryption lockouts.",
-    impact:
-      "Loss of key material can result in permanent data inaccessibility for Azure Disk Encryption, SQL TDE, and any customer-managed encryption scenarios. Recovery time from a key deletion incident without soft-delete: impossible. With soft-delete: minutes. The Azure Security Benchmark (DP-6) and CIS 8.1 require soft-delete to be enabled for all Key Vaults.",
-    costImpact:
-      "Enabling soft-delete and purge protection is free. The cost of a key deletion incident includes service restoration, potential data recovery consultants, and business downtime. Estimated downtime cost per hour for critical production services: $10K\u2013$100K. Remediation cost: $0. This violation has already been resolved as a proactive measure.",
-    steps: [
-      "In Azure Portal, go to keyvault-prod and open the 'Properties' blade",
-      "Enable 'Soft-delete' (set retention period to 90 days per best practice)",
-      "Enable 'Purge protection' to prevent permanent deletion before the retention period ends",
-      "Verify the configuration by attempting to delete and recover a test secret through Azure CLI or Portal",
-    ],
-  },
-];
 
 const severityColors: Record<string, string> = {
   Critical: "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800",
@@ -144,7 +66,66 @@ function ViolationReport() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const id = searchParams.get("id");
-  const violation = violations.find((v) => v.id === Number(id));
+  const { security, advisor } = useTenantDataStore();
+
+  const violation = useMemo((): ViolationData | null => {
+    if (!id) return null;
+
+    const fromAdvisor = (advisor?.recommendations ?? []).find((r: any, i: number) => `adv-${r.id || i}` === id);
+    if (fromAdvisor) {
+      const sev = (fromAdvisor.impact || "Medium").toLowerCase() === "high" ? "High"
+        : (fromAdvisor.impact || "Medium").toLowerCase() === "medium" ? "Medium" : "Low";
+      return {
+        id: `adv-${fromAdvisor.id || 0}`,
+        policy: fromAdvisor.problem || fromAdvisor.solution || "Advisor Recommendation",
+        resource: fromAdvisor.resource || "Unknown Resource",
+        resourceType: "Azure Resource",
+        severity: sev,
+        status: "Open",
+        location: "Azure / Default Region",
+        description: fromAdvisor.problem
+          ? `${fromAdvisor.problem}\n\nCategory: ${fromAdvisor.category || "General"}. Impact: ${fromAdvisor.impact || "Unknown"}.`
+          : "No detailed description available.",
+        impact: `This ${sev.toLowerCase()}-severity violation affects your compliance posture. ${fromAdvisor.category ? `Category: ${fromAdvisor.category}. ` : ""}Recommended action: ${fromAdvisor.solution || "Review and remediate."}`,
+        costImpact: "Remediation cost varies based on the specific changes required. Azure Policy remediation is typically free of charge. The cost of inaction includes potential compliance penalties and security risks.",
+        steps: [
+          "Review the recommendation details in Azure Advisor",
+          "Assess the impact on affected resources",
+          "Apply the recommended remediation through Azure Portal or CLI",
+          "Verify compliance after remediation",
+        ],
+        category: fromAdvisor.category || "Advisor",
+      };
+    }
+
+    const fromAlert = (security?.alerts ?? []).find((a: any, i: number) => `alert-${a.id || a.name || i}` === id);
+    if (fromAlert) {
+      const sevMap: Record<string, string> = { high: "High", medium: "Medium", low: "Low" };
+      const severity = sevMap[(fromAlert.severity || "").toLowerCase()] || "Medium";
+      const resource = fromAlert.resource_identifiers?.[0]?.split("/").pop() || "unknown";
+      return {
+        id: `alert-${fromAlert.id || ""}`,
+        policy: fromAlert.name || "Security Alert",
+        resource,
+        resourceType: "Azure Resource",
+        severity,
+        status: fromAlert.status === "Resolved" ? "Resolved" : "Open",
+        location: fromAlert.resource_identifiers?.[0]?.split("/").slice(0, 3).join("/") || "Azure",
+        description: fromAlert.description || fromAlert.name || "Security alert from Microsoft Defender for Cloud.",
+        impact: `Microsoft Defender for Cloud has detected a ${severity.toLowerCase()}-severity security issue: ${fromAlert.name || "Alert"}. If not addressed, this could lead to data exposure or compliance violations.`,
+        costImpact: "Security incidents can result in significant costs including data breach remediation, regulatory fines, and operational downtime. Average cost of a data breach: $4.45M (IBM 2024).",
+        steps: [
+          "Investigate the security alert in Microsoft Defender for Cloud",
+          "Review affected resources and attack surface",
+          "Apply recommended remediation actions",
+          "Verify the alert is resolved after remediation",
+        ],
+        category: "Defender",
+      };
+    }
+
+    return null;
+  }, [id, advisor, security]);
 
   const cardVariants = {
     hidden: { opacity: 0, y: 24 },
@@ -184,7 +165,7 @@ function ViolationReport() {
     );
   }
 
-  const FixNowUrl = `/compliance/chat?prompt=I+want+to+fix+${encodeURIComponent(violation.policy)}+on+${encodeURIComponent(violation.resource)}+located+in+${encodeURIComponent(violation.location)}.+${encodeURIComponent(violation.description)}`;
+  const FixNowUrl = `/compliance/chat?prompt=I+want+to+fix+${encodeURIComponent(violation.policy)}+on+${encodeURIComponent(violation.resource)}`;
 
   return (
     <AgentLayout>
@@ -272,9 +253,9 @@ function ViolationReport() {
               <MapPin className="h-4 w-4 text-amber-600 dark:text-amber-400" />
             </div>
             <div className="min-w-0">
-              <p className="text-xs text-gray-500 dark:text-slate-400">Location</p>
+              <p className="text-xs text-gray-500 dark:text-slate-400">Category</p>
               <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">
-                {violation.location}
+                {violation.category || "General"}
               </p>
             </div>
           </div>
@@ -295,7 +276,7 @@ function ViolationReport() {
               </CardTitle>
             </CardHeader>
             <CardContent className="pt-5">
-              <p className="text-sm text-gray-600 dark:text-slate-300 leading-relaxed">
+              <p className="text-sm text-gray-600 dark:text-slate-300 leading-relaxed whitespace-pre-line">
                 {violation.description}
               </p>
             </CardContent>
@@ -314,7 +295,7 @@ function ViolationReport() {
               <CardHeader className="border-b border-gray-100 dark:border-slate-700 bg-gray-50/50 dark:bg-slate-800/50 pb-4">
                 <CardTitle className="text-base font-semibold text-gray-900 dark:text-white flex items-center gap-2">
                   <Activity className="h-4 w-4 text-rose-500" />
-                  Future Impact Assessment
+                  Impact Assessment
                 </CardTitle>
               </CardHeader>
               <CardContent className="pt-5">

@@ -1,11 +1,12 @@
 "use client";
 
+import { useState, useEffect, useMemo } from "react";
 import { motion } from "framer-motion";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { AssistantInputModule } from "@/components/assistant/AssistantInputModule";
+import { AnimatedGradientChatInput } from "@/components/assistant/AnimatedGradientChatInput";
 import { 
   ArrowRight, History, Plus, Database, 
   Server, Cloud, HardDrive, Globe, Container, Clock, Activity,
@@ -13,9 +14,39 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
+import { useTenantDataStore } from "@/store/tenantDataStore";
+import { useMigrationStore } from "@/store/migrationStore";
 
 export default function MigrationAgentPage() {
   const router = useRouter();
+  const [chatInput, setChatInput] = useState("");
+  const { stats, loading, fetchAll } = useTenantDataStore();
+  const migrations = useMigrationStore((s) => s.migrations);
+  const totalCompleted = useMigrationStore((s) => s.totalCompleted);
+  const totalInProgress = useMigrationStore((s) => s.totalInProgress);
+  const totalPlanned = useMigrationStore((s) => s.totalPlanned);
+
+  useEffect(() => {
+    if (loading) fetchAll();
+  }, []);
+
+  const recentMigrations = useMemo(() => migrations.slice(0, 10), [migrations]);
+
+  const totalResourcesMigrated = useMemo(
+    () => migrations.filter((m) => m.status === "completed").reduce((sum, m) => sum + m.resourcesMigrated, 0),
+    [migrations]
+  );
+
+  const overallProgress = useMemo(() => {
+    const total = migrations.length;
+    if (total === 0) return 0;
+    const completed = migrations.filter((m) => m.status === "completed").length;
+    return Math.round((completed / total) * 100);
+  }, [migrations]);
+
+  useEffect(() => {
+    if (loading) fetchAll();
+  }, []);
 
   const quickActions = [
     {
@@ -113,12 +144,6 @@ export default function MigrationAgentPage() {
     },
   ];
 
-  const recentMigrations = [
-    { name: "prod-web-servers", type: "Lift & Shift", status: "completed", progress: 100, time: "1 day ago" },
-    { name: "customer-db", type: "Database Migration", status: "in-progress", progress: 67, time: "2 hours ago" },
-    { name: "legacy-app", type: "Replatform", status: "completed", progress: 100, time: "3 days ago" },
-  ];
-
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-slate-950 flex">
       <Sidebar />
@@ -171,13 +196,15 @@ export default function MigrationAgentPage() {
             </div>
 
             {/* AI Assistant Section */}
-            <AssistantInputModule
+            <AnimatedGradientChatInput
               title="Migration Assist"
               icon={<TrendingUp className="h-5 w-5 text-azure-500" />}
               quickActions={quickActions}
               placeholderVariants={placeholderVariants}
               agentType="migration"
               className="mb-6"
+              value={chatInput}
+              onValueChange={setChatInput}
             />
 
             <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
@@ -198,7 +225,7 @@ export default function MigrationAgentPage() {
                           animate={{ opacity: 1, y: 0 }}
                           transition={{ duration: 0.3, delay: index * 0.05 }}
                           whileHover={{ y: -4, boxShadow: "0 8px 25px rgba(0, 0, 0, 0.1)" }}
-                          onClick={() => router.push(`/migration/chat?prompt=${encodeURIComponent(scenario.prompt)}`)}
+                          onClick={() => setChatInput(scenario.prompt)}
                           className="border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-xl p-4 cursor-pointer transition-all hover:border-azure-300 dark:hover:border-azure-700"
                         >
                           <div className={cn("w-10 h-10 rounded-lg flex items-center justify-center mb-3", scenario.iconBg)}>
@@ -250,7 +277,7 @@ export default function MigrationAgentPage() {
                               <h4 className="text-sm font-medium text-gray-900 dark:text-white">
                                 {migration.name}
                               </h4>
-                              <span className="text-xs text-gray-500 dark:text-slate-400">{migration.time}</span>
+                              <span className="text-xs text-gray-500 dark:text-slate-400">{migration.dateTime}</span>
                             </div>
                             <p className="text-xs text-gray-500 dark:text-slate-400 mb-2">{migration.type}</p>
                             {migration.status === "in-progress" && (
@@ -282,15 +309,15 @@ export default function MigrationAgentPage() {
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
                         <span className="text-xs text-gray-500 dark:text-slate-400">Completed</span>
-                        <span className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">12</span>
+                        <span className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">{totalCompleted()}</span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-xs text-gray-500 dark:text-slate-400">In Progress</span>
-                        <span className="text-sm font-semibold text-blue-600 dark:text-blue-400">3</span>
+                        <span className="text-sm font-semibold text-blue-600 dark:text-blue-400">{totalInProgress()}</span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-xs text-gray-500 dark:text-slate-400">Planned</span>
-                        <span className="text-sm font-semibold text-amber-600 dark:text-amber-400">5</span>
+                        <span className="text-sm font-semibold text-amber-600 dark:text-amber-400">{totalPlanned()}</span>
                       </div>
                     </div>
                   </CardContent>
@@ -306,9 +333,9 @@ export default function MigrationAgentPage() {
                   </CardHeader>
                   <CardContent>
                     <div className="text-center py-4">
-                      <p className="text-3xl font-bold text-gray-900 dark:text-white">2.4 TB</p>
+                      <p className="text-3xl font-bold text-gray-900 dark:text-white">{totalResourcesMigrated}</p>
                       <p className="text-xs text-gray-500 dark:text-slate-400 mt-1">
-                        Total data migrated
+                        Resources migrated
                       </p>
                     </div>
                   </CardContent>
@@ -323,7 +350,9 @@ export default function MigrationAgentPage() {
                   </CardHeader>
                   <CardContent>
                     <div className="text-center py-4">
-                      <p className="text-3xl font-bold text-azure-600 dark:text-azure-400">67%</p>
+                      <p className="text-3xl font-bold text-azure-600 dark:text-azure-400">
+                        {migrations.length > 0 ? `${overallProgress}%` : "0%"}
+                      </p>
                       <p className="text-xs text-gray-500 dark:text-slate-400 mt-1">
                         Overall completion
                       </p>

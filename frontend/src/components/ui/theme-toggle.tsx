@@ -3,25 +3,33 @@
 import { Moon, Sun } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useThemeStore } from "@/store/themeStore";
+import { useSettingsStore } from "@/store/settingsStore";
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 
 export function ThemeToggle() {
   const { theme, setTheme } = useThemeStore();
+  const appearance = useSettingsStore((s) => s.appearance);
+  const updateAppearance = useSettingsStore((s) => s.updateAppearance);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  const toggleTheme = () => {
-    if (theme === "light") {
+  // Sync settingsStore.darkMode with themeStore
+  useEffect(() => {
+    if (appearance.darkMode && theme !== "dark") {
       setTheme("dark");
-    } else if (theme === "dark") {
-      setTheme("light");
-    } else {
+    } else if (!appearance.darkMode && theme !== "light") {
       setTheme("light");
     }
+  }, [appearance.darkMode, theme, setTheme]);
+
+  const toggleTheme = () => {
+    const newTheme = theme === "light" ? "dark" : "light";
+    setTheme(newTheme);
+    updateAppearance({ darkMode: newTheme === "dark" });
   };
 
   const isDark = theme === "dark" || (theme === "system" && 
