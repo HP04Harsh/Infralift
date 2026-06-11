@@ -154,7 +154,7 @@ function ProvisioningChatInner() {
 
     try {
       const res: any = await apiService.provisioningAgentChat(sessionId, content);
-      const events: ActivityEvent[] = (res?.events || []).filter((e: any) => e.type === "activity");
+      const events: ActivityEvent[] = (res?.events || []).filter((e: any) => e.type === "activity" || e.type === "status");
 
       if (res?.session_id) setSessionId(res.session_id);
       if (res?.plan) setPlan(res.plan);

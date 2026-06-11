@@ -250,15 +250,18 @@ Return ONLY a JSON object with fields that have values PROVIDED in the text. Lea
 
         if not missing:
             session.phase = "planning"
+            session.error = ""
+            await self._save_session(session)
             yield {"type": "activity", "icon": "CheckCircle", "title": f"Detected: {resource_type}", "status": "completed", "message": f"All required information collected for {resource_type}. Generating deployment plan..."}
             async for event in self._handle_plan_generation(session, user_id, azure_creds):
                 yield event
         else:
             session.phase = "collecting"
-            await self._save_session(session)
             missing_labels = [f.replace("_", " ").title() for f in missing]
+            session.error = f"I need a few more details to create the {resource_type}. Please provide: {', '.join(missing_labels)}."
+            await self._save_session(session)
             yield {"type": "activity", "icon": "CheckCircle", "title": f"Detected: {resource_type}", "status": "completed"}
-            yield {"type": "status", "status": "info", "message": f"I need a few more details to create the {resource_type}. Please provide: {', '.join(missing_labels)}.", "missing_fields": missing}
+            yield {"type": "status", "status": "info", "message": session.error, "missing_fields": missing}
 
     async def _handle_field_collection(
         self, session: ProvisioningSession, message: str, user_id: str, azure_creds: Optional[Dict[str, str]]
@@ -294,18 +297,22 @@ Extract any of the still-needed field values from this message. Return ONLY a JS
 
         if not session.missing_fields:
             session.phase = "planning"
+            session.error = ""
             yield {"type": "activity", "icon": "CheckCircle", "title": "All information collected", "status": "completed", "message": "All required information collected. Generating deployment plan..."}
             async for event in self._handle_plan_generation(session, user_id, azure_creds):
                 yield event
         else:
             # Check if the user provided values that weren't extracted
             no_new_info = len([f for f in still_missing if f not in session.missing_fields]) == 0
+            missing_msg = ""
             if no_new_info and self._is_off_topic(message, session):
-                yield {"type": "status", "status": "info", "message": f"I still need: {', '.join(f.replace('_', ' ').title() for f in session.missing_fields)}. Please provide these details.", "missing_fields": session.missing_fields}
+                missing_msg = f"I still need: {', '.join(f.replace('_', ' ').title() for f in session.missing_fields)}. Please provide these details."
             else:
                 missing_labels = [f.replace("_", " ").title() for f in session.missing_fields]
-                yield {"type": "status", "status": "info", "message": f"Still needed: {', '.join(missing_labels)}.", "missing_fields": session.missing_fields}
+                missing_msg = f"Still needed: {', '.join(missing_labels)}."
+            session.error = missing_msg
             await self._save_session(session)
+            yield {"type": "status", "status": "info", "message": missing_msg, "missing_fields": session.missing_fields}
 
     def _is_off_topic(self, message: str, session: ProvisioningSession) -> bool:
         msg_lower = message.lower()
@@ -347,6 +354,7 @@ Respond with ONLY a JSON object:
         if plan_result.get("success"):
             session.plan = plan_result["structured"]
             session.phase = "approval"
+            session.error = ""
             await self._save_session(session)
             yield {"type": "plan", "plan": session.plan,
                    "message": f"## Deployment Plan\n\n**Resource Type:** {session.plan.get('resource_type', session.resource_type)}\n**Name:** {session.plan.get('name', '')}\n**Region:** {session.plan.get('region', '')}\n**Resource Group:** {session.plan.get('resource_group', '')}\n**Size/SKU:** {session.plan.get('size', 'Standard')}\n**Environment:** {session.plan.get('environment', 'production')}\n\nProceed with deployment? Type **yes** to proceed or **no** to cancel."}
