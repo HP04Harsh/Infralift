@@ -22,9 +22,14 @@ const config: Config = {
           800: '#075985',
           900: '#0c4a6e',
         },
+        primary: 'var(--primary-color, #0078d4)',
+        accent: 'var(--accent-color, #8b5cf6)',
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', 'sans-serif'],
+        sans: ['var(--font-family, Inter)', 'system-ui', 'sans-serif'],
+      },
+      borderRadius: {
+        DEFAULT: 'var(--border-radius, 8px)',
       },
       animation: {
         'fade-in': 'fadeIn 0.3s ease-in',

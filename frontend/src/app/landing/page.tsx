@@ -7,10 +7,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useRouter } from "next/navigation";
 import { useUserStore } from "@/store/userStore";
+import { useSettingsStore } from "@/store/settingsStore";
+import { apiService } from "@/services/api";
 
 export default function LandingPage() {
   const router = useRouter();
   const { authenticateUser, addUser } = useUserStore();
+  const { general } = useSettingsStore();
   const [activeTab, setActiveTab] = useState<'signin' | 'signup'>('signin');
   const [showPassword, setShowPassword] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -18,6 +21,7 @@ export default function LandingPage() {
   const [formData, setFormData] = useState({
     username: '',
     password: '',
+    email: '',
     mobile: '',
     city: '',
     reason: ''
@@ -34,77 +38,63 @@ export default function LandingPage() {
     setParticles(newParticles);
   }, []);
 
-  const handleSignIn = (e: React.FormEvent) => {
+  const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // Authenticate using user store
-    const user = authenticateUser(formData.username, formData.password);
-    
-    if (user) {
-      localStorage.setItem('auth_token', `mock-token-${user.id}`);
-      localStorage.setItem('user_role', user.role);
-      localStorage.setItem('user_name', user.username);
-      localStorage.setItem('user_id', user.id);
-      
-      // Track login activity
-      const platform = navigator.userAgent.includes('Chrome') ? 'Chrome' : navigator.userAgent.includes('Firefox') ? 'Firefox' : navigator.userAgent.includes('Safari') ? 'Safari' : 'Unknown';
-      const os = navigator.userAgent.includes('Windows') ? 'Windows' : navigator.userAgent.includes('Mac') ? 'Mac' : navigator.userAgent.includes('Linux') ? 'Linux' : 'Unknown';
-      const loginRecord = {
-        time: new Date().toLocaleString(),
-        platform: `${platform} on ${os}`,
-        location: formData.city || 'Unknown',
-        ip: '127.0.0.1',
-      };
-      const existing = JSON.parse(localStorage.getItem('login_activities') || '[]');
-      existing.unshift(loginRecord);
-      if (existing.length > 10) existing.length = 10;
-      localStorage.setItem('login_activities', JSON.stringify(existing));
-      
-      const onboardingCompleted = localStorage.getItem('onboarding_completed') === 'true';
-      if (onboardingCompleted) {
-        router.push('/dashboard');
+    try {
+      const res: any = await apiService.login(formData.username, formData.password);
+      if (res?.success && res?.token) {
+        localStorage.setItem('auth_token', res.token);
+        localStorage.setItem('user_role', 'admin');
+        localStorage.setItem('user_name', formData.username);
+        localStorage.setItem('user_email', formData.username);
+        localStorage.setItem('user_id', res.user_id || formData.username);
+
+        const browser = navigator.userAgent.includes('Chrome') ? 'Chrome' : navigator.userAgent.includes('Firefox') ? 'Firefox' : navigator.userAgent.includes('Safari') ? 'Safari' : 'Unknown';
+        const os = navigator.userAgent.includes('Windows') ? 'Windows' : navigator.userAgent.includes('Mac') ? 'Mac' : navigator.userAgent.includes('Linux') ? 'Linux' : 'Unknown';
+        const loginRecord = { type: 'login', time: new Date().toLocaleString(), username: formData.username, browser, platform: `${browser} on ${os}`, location: formData.city || 'Unknown', ip: '127.0.0.1' };
+        const existing = JSON.parse(localStorage.getItem('login_activities') || '[]');
+        existing.unshift(loginRecord);
+        if (existing.length > 10) existing.length = 10;
+        localStorage.setItem('login_activities', JSON.stringify(existing));
+
+        const onboardingCompleted = localStorage.getItem('onboarding_completed') === 'true';
+        if (onboardingCompleted) { router.push('/dashboard'); }
+        else { localStorage.removeItem('infralift-onboarding-storage'); router.push('/onboarding'); }
       } else {
-        localStorage.removeItem('infralift-onboarding-storage');
-        router.push('/onboarding');
+        alert('Login failed. Please check your credentials.');
       }
-    } else {
-      alert('Invalid credentials. Please try again.');
+    } catch {
+      alert('Login failed. Please check your credentials and try again.');
     }
   };
 
-  const handleSignUp = (e: React.FormEvent) => {
+  const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // Check if user already exists
-    const existingUser = authenticateUser(formData.username, '');
-    if (existingUser) {
-      alert('Username already exists. Please choose a different username.');
-      return;
+    try {
+      const res: any = await apiService.register(formData.username, formData.password, formData.username, formData.city || '');
+      if (res?.success && res?.token) {
+        localStorage.setItem('auth_token', res.token);
+        localStorage.setItem('user_role', 'admin');
+        localStorage.setItem('user_name', formData.username);
+        localStorage.setItem('user_email', formData.username);
+        localStorage.setItem('user_id', res.user_id || formData.username);
+        localStorage.setItem('onboarding_completed', 'false');
+
+        const browser = navigator.userAgent.includes('Chrome') ? 'Chrome' : navigator.userAgent.includes('Firefox') ? 'Firefox' : navigator.userAgent.includes('Safari') ? 'Safari' : 'Unknown';
+        const loginRecord = { type: 'login', time: new Date().toLocaleString(), username: formData.username, browser, platform: `${browser} on ${navigator.userAgent.includes('Windows') ? 'Windows' : navigator.userAgent.includes('Mac') ? 'Mac' : navigator.userAgent.includes('Linux') ? 'Linux' : 'Unknown'}`, location: formData.city || 'Unknown', ip: '127.0.0.1' };
+        const existing = JSON.parse(localStorage.getItem('login_activities') || '[]');
+        existing.unshift(loginRecord);
+        if (existing.length > 10) existing.length = 10;
+        localStorage.setItem('login_activities', JSON.stringify(existing));
+
+        localStorage.removeItem('infralift-onboarding-storage');
+        router.push('/onboarding');
+      } else {
+        alert('Registration failed. Please try again.');
+      }
+    } catch {
+      alert('Registration failed. Please try again.');
     }
-    
-    // Add new user with reader role
-    addUser({
-      username: formData.username,
-      password: formData.password,
-      role: 'reader',
-      mobile: formData.mobile,
-      city: formData.city,
-      reason: formData.reason,
-    });
-    
-    // Store auth token
-    localStorage.setItem('auth_token', `mock-token-new-${Date.now()}`);
-    localStorage.setItem('user_role', 'reader');
-    localStorage.setItem('user_name', formData.username);
-    localStorage.setItem('user_mobile', formData.mobile);
-    localStorage.setItem('user_city', formData.city);
-    localStorage.setItem('user_reason', formData.reason);
-    localStorage.setItem('onboarding_completed', 'false');
-    
-    // Reset onboarding state to start fresh
-    localStorage.removeItem('infralift-onboarding-storage');
-    
-    router.push('/onboarding');
   };
 
   return (
@@ -194,7 +184,7 @@ export default function LandingPage() {
                     <path d="M12 5C9.58 5 7.45 6.54 6.55 8.68C4.47 8.9 2.8 10.6 2.8 12.7C2.8 14.97 4.63 16.8 6.9 16.8H17.8C19.68 16.8 21.2 15.28 21.2 13.4C21.2 11.68 19.92 10.26 18.26 10.02C17.72 7.18 15.14 5 12 5Z" fill="#0078D4" />
                   </svg>
                 </div>
-                <h1 className="text-3xl font-bold text-white mb-2">Infralift</h1>
+                <h1 className="text-3xl font-bold text-white mb-2">{general.portalName}</h1>
                 <p className="text-gray-300 text-sm">Azure Infrastructure Automation Platform</p>
               </motion.div>
 
@@ -274,7 +264,7 @@ export default function LandingPage() {
                   </Button>
 
                   <p className="text-center text-xs text-gray-400">
-                    Default credentials: admin / 123
+                    New here? Create an account using Sign Up.
                   </p>
                 </form>
               ) : (
@@ -317,6 +307,23 @@ export default function LandingPage() {
                       >
                         {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                       </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-2">
+                      Email Address
+                    </label>
+                    <div className="relative">
+                      <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                      <Input
+                        type="email"
+                        value={formData.email}
+                        onChange={(e) => setFormData({...formData, email: e.target.value})}
+                        placeholder="Enter your email"
+                        className="pl-10 bg-white/10 border-white/20 text-white placeholder-gray-400 focus:border-azure-500"
+                        required
+                      />
                     </div>
                   </div>
 

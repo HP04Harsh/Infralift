@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: infralift-mongodb
+  namespace: default
+  labels:
+    app: infralift-mongodb
+    version: v1.3.0
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: infralift-mongodb
+  template:
+    metadata:
+      labels:
+        app: infralift-mongodb
+    spec:
+      containers:
+      - name: mongodb
+        image: mongo:7
+        ports:
+        - containerPort: 27017
+          name: mongodb
+          protocol: TCP
+        env:
+        - name: MONGO_INITDB_DATABASE
+          value: "infralift"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          exec:
+            command:
+            - mongosh
+            - --quiet
+            - --eval
+            - "db.adminCommand('ping')"
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+      restartPolicy: Always
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb-service
+  namespace: default
+  labels:
+    app: infralift-mongodb
+spec:
+  type: ClusterIP
+  selector:
+    app: infralift-mongodb
+  ports:
+  - port: 27017
+    targetPort: 27017
+    protocol: TCP
+    name: mongodb
+  sessionAffinity: None

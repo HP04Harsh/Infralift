@@ -15,12 +15,20 @@ from azure.mgmt.advisor import AdvisorManagementClient
 from azure.mgmt.security import SecurityCenter
 from azure.mgmt.costmanagement import CostManagementClient
 from azure.mgmt.costmanagement.models import QueryDefinition, TimeframeType, GranularityType
+from azure.mgmt.resourcegraph import ResourceGraphClient
+from azure.mgmt.resourcegraph.models import QueryRequest
 from azure.core.exceptions import HttpResponseError
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Callable, TypeVar
 from datetime import datetime, timedelta
 import json
 import asyncio
+import httpx
+import random
+
+from app.core.config import settings
+
+T = TypeVar("T")
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +39,21 @@ class AzureSyncService:
     def __init__(self, redis_client):
         self.redis_client = redis_client
         self.sync_status = {}
+
+    async def _retry_with_backoff(self, step_name: str, fn: Callable[[], T], max_retries: int = 3) -> T:
+        """Execute a function with exponential backoff retry."""
+        for attempt in range(max_retries + 1):
+            try:
+                return await fn()
+            except Exception as e:
+                if attempt < max_retries:
+                    wait = (2 ** attempt) + random.uniform(0, 1)
+                    logger.warning("%s attempt %d/%d failed: %s. Retrying in %.1fs...", step_name, attempt + 1, max_retries, e, wait)
+                    await asyncio.sleep(wait)
+                else:
+                    logger.error("%s failed after %d attempts: %s", step_name, max_retries + 1, e)
+                    raise
+        raise RuntimeError(f"{step_name}: unreachable")
 
     async def sync_tenant_resources(
         self,
@@ -57,46 +80,122 @@ class AzureSyncService:
             "started_at": datetime.utcnow().isoformat()
         }
 
+        errors = {}
+        resource_groups = []
+        virtual_machines = []
+        network_resources = []
+        storage_accounts = []
+        sql_databases = []
+        key_vaults = []
+        web_apps = []
+        container_instances = []
+        monitoring_metrics = {"virtual_machines": [], "storage_accounts": [], "sql_databases": []}
+        cost_data = self._empty_cost_data()
+        security_findings = {"secure_score": 0, "secure_score_percentage": 0, "alerts": []}
+        advisor_recommendations = {"recommendations": [], "count": 0}
+
         try:
+            # Step 0: Azure Resource Graph — authoritative resource count
+            self.sync_status[sync_id]["current_step"] = "Querying Azure Resource Graph"
+            self.sync_status[sync_id]["progress"] = 2
+            rg_summary = await self._retry_with_backoff(
+                "resource_graph", lambda: self._fetch_resource_graph_summary(credentials, subscription_id)
+            )
+            logger.info(
+                "Resource Graph: %d total resources, %d VMs, %d resource groups (error=%s)",
+                rg_summary.get("resources", 0),
+                rg_summary.get("virtual_machines", 0),
+                rg_summary.get("resource_groups", 0),
+                rg_summary.get("error", "none")
+            )
+
             # Step 1: Resource Groups
             self.sync_status[sync_id]["current_step"] = "Fetching Resource Groups"
             self.sync_status[sync_id]["progress"] = 5
-            resource_groups = await self._fetch_resource_groups(credentials, subscription_id)
+            try:
+                resource_groups = await self._retry_with_backoff(
+                    "resource_groups", lambda: self._fetch_resource_groups(credentials, subscription_id)
+                )
+            except Exception as e:
+                errors["resource_groups"] = str(e)
+                resource_groups = []
 
             # Step 2: Virtual Machines
             self.sync_status[sync_id]["current_step"] = "Fetching Virtual Machines"
             self.sync_status[sync_id]["progress"] = 15
-            virtual_machines = await self._fetch_virtual_machines(credentials, subscription_id)
+            try:
+                virtual_machines = await self._retry_with_backoff(
+                    "virtual_machines", lambda: self._fetch_virtual_machines(credentials, subscription_id)
+                )
+            except Exception as e:
+                errors["virtual_machines"] = str(e)
+                virtual_machines = []
 
             # Step 3: Network Resources
             self.sync_status[sync_id]["current_step"] = "Fetching Network Resources"
             self.sync_status[sync_id]["progress"] = 25
-            network_resources = await self._fetch_network_resources(credentials, subscription_id)
+            try:
+                network_resources = await self._retry_with_backoff(
+                    "network_resources", lambda: self._fetch_network_resources(credentials, subscription_id)
+                )
+            except Exception as e:
+                errors["network_resources"] = str(e)
+                network_resources = []
 
             # Step 4: Storage Accounts
             self.sync_status[sync_id]["current_step"] = "Fetching Storage Accounts"
             self.sync_status[sync_id]["progress"] = 35
-            storage_accounts = await self._fetch_storage_accounts(credentials, subscription_id)
+            try:
+                storage_accounts = await self._retry_with_backoff(
+                    "storage_accounts", lambda: self._fetch_storage_accounts(credentials, subscription_id)
+                )
+            except Exception as e:
+                errors["storage_accounts"] = str(e)
+                storage_accounts = []
 
             # Step 5: SQL Databases
             self.sync_status[sync_id]["current_step"] = "Fetching SQL Databases"
             self.sync_status[sync_id]["progress"] = 45
-            sql_databases = await self._fetch_sql_databases(credentials, subscription_id)
+            try:
+                sql_databases = await self._retry_with_backoff(
+                    "sql_databases", lambda: self._fetch_sql_databases(credentials, subscription_id)
+                )
+            except Exception as e:
+                errors["sql_databases"] = str(e)
+                sql_databases = []
 
             # Step 6: Key Vaults
             self.sync_status[sync_id]["current_step"] = "Fetching Key Vaults"
             self.sync_status[sync_id]["progress"] = 50
-            key_vaults = await self._fetch_key_vaults(credentials, subscription_id)
+            try:
+                key_vaults = await self._retry_with_backoff(
+                    "key_vaults", lambda: self._fetch_key_vaults(credentials, subscription_id)
+                )
+            except Exception as e:
+                errors["key_vaults"] = str(e)
+                key_vaults = []
 
             # Step 7: Web Apps
             self.sync_status[sync_id]["current_step"] = "Fetching App Services"
             self.sync_status[sync_id]["progress"] = 55
-            web_apps = await self._fetch_web_apps(credentials, subscription_id)
+            try:
+                web_apps = await self._retry_with_backoff(
+                    "web_apps", lambda: self._fetch_web_apps(credentials, subscription_id)
+                )
+            except Exception as e:
+                errors["web_apps"] = str(e)
+                web_apps = []
 
             # Step 8: Container Instances
             self.sync_status[sync_id]["current_step"] = "Fetching Container Instances"
             self.sync_status[sync_id]["progress"] = 60
-            container_instances = await self._fetch_container_instances(credentials, subscription_id)
+            try:
+                container_instances = await self._retry_with_backoff(
+                    "container_instances", lambda: self._fetch_container_instances(credentials, subscription_id)
+                )
+            except Exception as e:
+                errors["container_instances"] = str(e)
+                container_instances = []
 
             # Step 9: Monitoring Metrics (runs in thread for sync SDK)
             self.sync_status[sync_id]["current_step"] = "Collecting Monitoring Metrics"
@@ -104,26 +203,62 @@ class AzureSyncService:
             vm_ids = [vm["id"] for vm in virtual_machines]
             storage_ids = [s["id"] for s in storage_accounts]
             sql_ids = [db["id"] for db in sql_databases]
-            monitoring_metrics = await self._fetch_monitoring_metrics(
-                credentials, subscription_id, vm_ids, storage_ids, sql_ids
-            )
+            try:
+                monitoring_metrics = await self._retry_with_backoff(
+                    "monitoring_metrics",
+                    lambda: self._fetch_monitoring_metrics(credentials, subscription_id, vm_ids, storage_ids, sql_ids)
+                )
+            except Exception as e:
+                errors["monitoring_metrics"] = str(e)
+                monitoring_metrics = {"virtual_machines": [], "storage_accounts": [], "sql_databases": []}
 
             # Step 10: Cost Data
             self.sync_status[sync_id]["current_step"] = "Fetching Cost Data"
             self.sync_status[sync_id]["progress"] = 80
-            cost_data = await self._fetch_cost_data(credentials, subscription_id)
+            try:
+                cost_data = await self._retry_with_backoff(
+                    "cost_data", lambda: self._fetch_cost_data(credentials, subscription_id)
+                )
+            except Exception as e:
+                errors["cost_data"] = str(e)
+                cost_data = self._empty_cost_data()
 
             # Step 11: Security Findings
             self.sync_status[sync_id]["current_step"] = "Fetching Security Findings"
             self.sync_status[sync_id]["progress"] = 87
-            security_findings = await self._fetch_security_findings(credentials, subscription_id)
+            try:
+                security_findings = await self._retry_with_backoff(
+                    "security_findings", lambda: self._fetch_security_findings(credentials, subscription_id)
+                )
+            except Exception as e:
+                errors["security_findings"] = str(e)
+                security_findings = {"secure_score": 0, "secure_score_percentage": 0, "alerts": []}
 
-            # Step 12: Advisor Recommendations
+            # Step 12: Azure Policy Compliance
+            self.sync_status[sync_id]["current_step"] = "Fetching Policy Compliance"
+            self.sync_status[sync_id]["progress"] = 92
+            try:
+                compliance_data = await self._retry_with_backoff(
+                    "compliance", lambda: self._fetch_compliance_data(credentials, subscription_id)
+                )
+            except Exception as e:
+                errors["compliance"] = str(e)
+                compliance_data = {}
+
+            # Step 13: Advisor Recommendations
             self.sync_status[sync_id]["current_step"] = "Fetching Advisor Recommendations"
             self.sync_status[sync_id]["progress"] = 95
-            advisor_recommendations = await self._fetch_advisor_recommendations(credentials, subscription_id)
+            try:
+                advisor_recommendations = await self._retry_with_backoff(
+                    "advisor_recommendations", lambda: self._fetch_advisor_recommendations(credentials, subscription_id)
+                )
+            except Exception as e:
+                errors["advisor_recommendations"] = str(e)
+                advisor_recommendations = {"recommendations": [], "count": 0}
 
-            total_resources = (
+            # Use Resource Graph count as authoritative (more accurate than summing individual API calls)
+            rg_total = rg_summary.get("resources", 0)
+            total_resources = rg_total if rg_total > 0 else (
                 len(resource_groups) + len(virtual_machines) + len(network_resources) +
                 len(storage_accounts) + len(sql_databases) + len(key_vaults) +
                 len(web_apps) + len(container_instances)
@@ -142,6 +277,7 @@ class AzureSyncService:
                 "monitoring_metrics": monitoring_metrics,
                 "cost_data": cost_data,
                 "security_findings": security_findings,
+                "compliance_data": compliance_data,
                 "advisor_recommendations": advisor_recommendations,
                 "synced_at": datetime.utcnow().isoformat(),
                 "total_resources": total_resources
@@ -149,18 +285,21 @@ class AzureSyncService:
 
             await self._cache_resource_data(sync_id, resource_inventory)
 
+            sync_status = "completed_with_errors" if errors else "completed"
             self.sync_status[sync_id] = {
-                "status": "completed",
+                "status": sync_status,
                 "progress": 100,
-                "current_step": "Completed",
+                "current_step": "Completed" if not errors else f"Completed with {len(errors)} error(s)",
                 "completed_at": datetime.utcnow().isoformat(),
-                "total_resources": total_resources
+                "total_resources": total_resources,
+                "errors": errors if errors else None,
             }
 
-            return {
-                "success": True,
+            result = {
+                "success": not errors,
                 "sync_id": sync_id,
                 "total_resources": total_resources,
+                "errors": errors if errors else None,
                 "resource_summary": {
                     "resource_groups": len(resource_groups),
                     "virtual_machines": len(virtual_machines),
@@ -172,20 +311,80 @@ class AzureSyncService:
                     "container_instances": len(container_instances)
                 }
             }
+            return result
 
         except Exception as e:
             logger.error(f"Resource sync failed: {str(e)}")
+            errors["sync_fatal"] = str(e)
+            # Still report partial results if any data was collected
+            status = "failed" if not errors else ("completed_with_errors" if errors else "completed")
             self.sync_status[sync_id] = {
-                "status": "failed",
-                "progress": 0,
-                "error": str(e),
+                "status": status,
+                "progress": 0 if "sync_fatal" in errors and not resource_groups else 50,
+                "error": str(e) if "sync_fatal" in errors else None,
+                "errors": errors,
                 "failed_at": datetime.utcnow().isoformat()
             }
             return {
-                "success": False,
-                "error": "SYNC_FAILED",
-                "message": str(e)
+                "success": status != "failed",
+                "error": "SYNC_FAILED" if "sync_fatal" in errors else None,
+                "errors": errors,
+                "message": str(e) if "sync_fatal" in errors else "Partial sync completed with errors"
             }
+
+    def _empty_cost_data(self) -> Dict[str, Any]:
+        return {
+            "month_to_date": 0,
+            "forecast": 0,
+            "cost_by_resource_group": {},
+            "cost_by_service": {},
+            "currency": ""
+        }
+
+    async def _fetch_resource_graph_summary(
+        self,
+        credentials: ClientSecretCredential,
+        subscription_id: str
+    ) -> Dict[str, Any]:
+        """Use Azure Resource Graph to get accurate resource counts across all types"""
+        result = {
+            "resource_groups": 0,
+            "virtual_machines": 0,
+            "resources": 0,
+            "error": None
+        }
+        try:
+            loop = asyncio.get_event_loop()
+            def _sync():
+                client = ResourceGraphClient(credentials)
+                query = """
+                resources
+                | where subscriptionId == '""" + subscription_id + """'
+                | summarize count() by type
+                | project type, count_
+                """
+                request = QueryRequest(query=query, subscriptions=[subscription_id])
+                response = client.resources(request)
+                counts = {}
+                total = 0
+                for row in response.data:
+                    if hasattr(row, 'count_'):
+                        total += row.count_
+                        counts[row.type] = row.count_
+                return {"counts": counts, "total": total}
+            summary = await loop.run_in_executor(None, _sync)
+            result["resources"] = summary["total"]
+            result["virtual_machines"] = summary["counts"].get("microsoft.compute/virtualmachines", 0)
+            result["resource_groups"] = summary["counts"].get("microsoft.resources/subscriptions/resourcegroups", 0)
+            return result
+        except ImportError:
+            logger.warning("azure-mgmt-resourcegraph not installed — falling back to individual SDK calls")
+            result["error"] = "ResourceGraph SDK not available"
+            return result
+        except Exception as e:
+            logger.error(f"Azure Resource Graph query failed: {str(e)}")
+            result["error"] = str(e)
+            return result
 
     async def _fetch_resource_groups(
         self,
@@ -559,11 +758,85 @@ class AzureSyncService:
             logger.error(f"Failed to fetch monitoring metrics: {str(e)}")
             return {"virtual_machines": [], "storage_accounts": [], "sql_databases": [], "error": str(e)}
 
+    async def _fetch_billing_currency(
+        self,
+        credentials: ClientSecretCredential,
+        subscription_id: str
+    ) -> str:
+        """Fetch the tenant's actual billing currency from Azure APIs"""
+        token = credentials.get_token("https://management.azure.com/.default")
+        headers = {"Authorization": f"Bearer {token.token}"}
+
+        # Try Consumption Usage Details API (works for all subscription types)
+        try:
+            usage_url = f"https://management.azure.com/subscriptions/{subscription_id}/providers/Microsoft.Consumption/usageDetails"
+            params = {"api-version": "2023-11-01", "$top": "1"}
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.get(usage_url, params=params, headers=headers)
+                if resp.status_code == 200:
+                    values = resp.json().get("value", [])
+                    if values:
+                        currency = values[0].get("properties", {}).get("billingCurrency")
+                        if currency:
+                            logger.info(f"Detected billing currency from Consumption API: {currency}")
+                            return currency
+        except Exception as e:
+            logger.warning(f"Consumption API currency fetch failed: {e}")
+
+        # Fallback: Try Billing Account API
+        try:
+            billing_url = "https://management.azure.com/providers/Microsoft.Billing/billingAccounts"
+            params = {"api-version": "2024-03-01-preview"}
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.get(billing_url, params=params, headers=headers)
+                if resp.status_code == 200:
+                    accounts = resp.json().get("value", [])
+                    if accounts:
+                        props = accounts[0].get("properties", {})
+                        currency = (
+                            (props.get("enrollmentDetails") or {}).get("currency")
+                            or props.get("billingCurrencyCode")
+                        )
+                        if currency:
+                            logger.info(f"Detected billing currency from Billing API: {currency}")
+                            return currency
+        except Exception as e:
+            logger.warning(f"Billing API currency fetch failed: {e}")
+
+        # Fallback: Try subscription display name / location to infer currency
+        try:
+            from azure.mgmt.resource import SubscriptionClient
+            sub_client = SubscriptionClient(credentials)
+            subscription = sub_client.subscriptions.get(subscription_id)
+            if subscription:
+                region_map = {
+                    "india": "INR", "europe": "EUR", "uk": "GBP", "japan": "JPY",
+                    "korea": "KRW", "brazil": "BRL", "australia": "AUD", "canada": "CAD",
+                    "uae": "AED", "singapore": "SGD", "hong kong": "HKD", "switzerland": "CHF",
+                }
+                display = (subscription.display_name or "").lower()
+                for key, cur in region_map.items():
+                    if key in display:
+                        logger.info(f"Detected currency from subscription name: {cur}")
+                        return cur
+        except Exception as e:
+            logger.warning(f"Subscription-based currency detection failed: {e}")
+
+        # Use env override if set
+        if settings.DEFAULT_BILLING_CURRENCY:
+            logger.info(f"Using DEFAULT_BILLING_CURRENCY env override: {settings.DEFAULT_BILLING_CURRENCY}")
+            return settings.DEFAULT_BILLING_CURRENCY
+
+        logger.info("Could not detect billing currency")
+        return ""
+
     async def _fetch_cost_data(
         self,
         credentials: ClientSecretCredential,
         subscription_id: str
     ) -> Dict[str, Any]:
+        # Fetch actual billing currency first (set default before try for except block)
+        billing_currency = await self._fetch_billing_currency(credentials, subscription_id)
         try:
             loop = asyncio.get_event_loop()
             def _sync():
@@ -655,20 +928,12 @@ class AzureSyncService:
                 except Exception:
                     forecast_cost = monthly_cost * 1.1
 
-                # Try to extract currency from cost result properties
-                currency = "USD"
-                try:
-                    raw = monthly_result.serialize()
-                    currency = raw.get("properties", {}).get("currency", "USD")
-                except Exception:
-                    pass
-
                 return {
                     "month_to_date": round(monthly_cost, 2),
                     "forecast": round(forecast_cost, 2),
                     "cost_by_resource_group": {k: round(v, 2) for k, v in cost_by_resource_group.items()},
                     "cost_by_service": cost_by_service,
-                    "currency": currency,
+                    "currency": billing_currency,
                     "last_updated": datetime.utcnow().isoformat()
                 }
             return await loop.run_in_executor(None, _sync)
@@ -679,9 +944,87 @@ class AzureSyncService:
                 "forecast": 0,
                 "cost_by_resource_group": {},
                 "cost_by_service": {},
-                "currency": "USD",
+                "currency": billing_currency,
                 "error": str(e)
             }
+
+    async def _fetch_compliance_data(
+        self,
+        credentials: ClientSecretCredential,
+        subscription_id: str
+    ) -> Dict[str, Any]:
+        """Fetch Azure Policy compliance states and regulatory compliance data"""
+        result = {
+            "policy_violations": [],
+            "regulatory_standards": {},
+            "compliant_resources": 0,
+            "non_compliant_resources": 0,
+            "total_resources_evaluated": 0,
+        }
+        try:
+            token = credentials.get_token("https://management.azure.com/.default")
+            headers = {"Authorization": f"Bearer {token.token}"}
+
+            # Azure Policy compliance states
+            async with httpx.AsyncClient(timeout=30) as client:
+                url = f"https://management.azure.com/subscriptions/{subscription_id}/providers/Microsoft.PolicyInsights/policyStates/latest/queryResults"
+                params = {"api-version": "2019-10-01", "$top": 100, "$filter": "complianceState eq 'NonCompliant'"}
+                resp = await client.post(url, params=params, headers=headers)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    violations = []
+                    for row in data.get("value", []):
+                        violations.append({
+                            "resource_id": row.get("resourceId", ""),
+                            "policy_name": row.get("policyDefinitionName", ""),
+                            "policy_display_name": row.get("policyDefinitionDisplayName", ""),
+                            "policy_set_name": row.get("policySetDefinitionName", ""),
+                            "compliance_state": row.get("complianceState", ""),
+                            "severity": row.get("policyDefinitionReferenceId", "medium"),
+                        })
+                    result["policy_violations"] = violations
+                    # Count by compliance state from the summary
+                    summary = data.get("@odata.context", "")
+                    # Try summary endpoint for counts
+                    try:
+                        summary_url = f"https://management.azure.com/subscriptions/{subscription_id}/providers/Microsoft.PolicyInsights/policyStates/latest/summarize"
+                        summary_resp = await client.post(summary_url, params={"api-version": "2019-10-01"}, headers=headers)
+                        if summary_resp.status_code == 200:
+                            sdata = summary_resp.json()
+                            for item in sdata.get("value", []):
+                                for state in item.get("policyAssignments", []):
+                                    for s in state.get("results", {}).get("resourceDetails", []):
+                                        if s.get("complianceState") == "Compliant":
+                                            result["compliant_resources"] += 1
+                                        else:
+                                            result["non_compliant_resources"] += 1
+                                        result["total_resources_evaluated"] += 1
+                    except Exception:
+                        pass
+
+            # Regulatory compliance standards (via Security Center)
+            try:
+                async with httpx.AsyncClient(timeout=30) as client:
+                    reg_url = f"https://management.azure.com/subscriptions/{subscription_id}/providers/Microsoft.Security/regulatoryComplianceStandards"
+                    reg_params = {"api-version": "2024-01-01"}
+                    reg_resp = await client.get(reg_url, params=reg_params, headers=headers)
+                    if reg_resp.status_code == 200:
+                        for std in reg_resp.json().get("value", []):
+                            std_name = std.get("name", "")
+                            props = std.get("properties", {})
+                            result["regulatory_standards"][std_name] = {
+                                "state": props.get("state", ""),
+                                "passed_controls": props.get("passedControls", 0),
+                                "failed_controls": props.get("failedControls", 0),
+                                "skipped_controls": props.get("skippedControls", 0),
+                                "unsupported_controls": props.get("unsupportedControls", 0),
+                            }
+            except Exception:
+                pass
+
+        except Exception as e:
+            logger.warning(f"Compliance data fetch failed: {e}")
+        return result
 
     async def _fetch_security_findings(
         self,
@@ -754,13 +1097,24 @@ class AzureSyncService:
                 client = AdvisorManagementClient(credentials, subscription_id)
                 result = []
                 for recommendation in client.recommendations.list():
+                    potentialSavings = 0
+                    resource = ""
+                    if recommendation.extended_properties:
+                        try:
+                            raw = recommendation.extended_properties.get("estimatedMonthlySavings", "0")
+                            potentialSavings = float(raw) if raw else 0
+                        except (ValueError, TypeError):
+                            potentialSavings = 0
+                        resource = recommendation.extended_properties.get("resource", "") or ""
                     result.append({
                         "id": recommendation.id,
                         "category": recommendation.category,
                         "impact": recommendation.impact,
                         "problem": recommendation.problem,
                         "solution": recommendation.solution,
-                        "recommendation_type": recommendation.recommendation_type
+                        "recommendation_type": recommendation.recommendation_type,
+                        "potentialSavings": potentialSavings,
+                        "resource": resource or recommendation.impacted_value or ""
                     })
                 return result
             return await loop.run_in_executor(None, _sync)
@@ -793,7 +1147,8 @@ class AzureSyncService:
                 },
                 "synced_at": data["synced_at"],
                 "cost_data": data.get("cost_data", {}),
-                "security_findings": data.get("security_findings", {})
+                "security_findings": data.get("security_findings", {}),
+                "compliance_data": data.get("compliance_data", {})
             }
             await self.redis_client.setex(
                 f"azure_summary:{sync_id}",

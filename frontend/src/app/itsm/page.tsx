@@ -10,7 +10,7 @@ import { AnimatedGradientChatInput } from "@/components/assistant/AnimatedGradie
 import {
   AlertTriangle, FileText, Settings,
   HelpCircle, Plus, Search, Clock, CheckCircle, User, Ticket, Activity, X, Mail, LayoutDashboard as LayoutDashboardIcon,
-  RefreshCw, Check, Eye, EyeOff, ExternalLink, Wrench, BarChart3
+  RefreshCw, Check, Eye, EyeOff, ExternalLink, Wrench, BarChart3, Database, Link, Repeat
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
@@ -79,6 +79,25 @@ export default function ITSMAgentPage() {
     setTestingConnection(false);
   };
 
+  /* ── Auto-created ServiceNow tickets ── */
+  const [snAutoTickets, setSnAutoTickets] = useState<any[]>([]);
+  const [snAutoTicketsLoading, setSnAutoTicketsLoading] = useState(false);
+  const [showAutoTickets, setShowAutoTickets] = useState(false);
+  const [snTicketStats, setSnTicketStats] = useState<any>(null);
+
+  const fetchAutoTickets = useCallback(async () => {
+    setSnAutoTicketsLoading(true);
+    try {
+      const res: any = await apiService.getServiceNowTickets({ limit: 50 });
+      setSnAutoTickets(res?.tickets ?? []);
+      const stats: any = await apiService.getServiceNowTicketStats();
+      setSnTicketStats(stats);
+    } catch {
+      setSnAutoTickets([]);
+    }
+    setSnAutoTicketsLoading(false);
+  }, []);
+
   /* ── Fetch real tickets from backend ── */
   const [backendTickets, setBackendTickets] = useState<TicketItem[]>([]);
   const [ticketsLoading, setTicketsLoading] = useState(true);
@@ -108,7 +127,8 @@ export default function ITSMAgentPage() {
   useEffect(() => {
     if (loading) fetchAll();
     fetchTickets();
-    const interval = setInterval(fetchTickets, 300000);
+    fetchAutoTickets();
+    const interval = setInterval(() => { fetchTickets(); fetchAutoTickets(); }, 300000);
     return () => clearInterval(interval);
   }, []);
 
@@ -145,6 +165,38 @@ export default function ITSMAgentPage() {
     });
   };
 
+  const [createResult, setCreateResult] = useState<{ ticketId: string; requestId: string; type: string; title: string } | null>(null);
+
+  const handleTicketCreate = async (type: string, prompt: string) => {
+    if (!isConnected) {
+      setSnConfigOpen(true);
+      return;
+    }
+    addNotification({ title: `Creating ${type}...`, message: "Submitting to ServiceNow", status: "info", category: "tenant_sync" });
+    try {
+      const title = `[${type}] ${prompt.slice(0, 72)}`;
+      const body: any = {
+        title,
+        description: prompt,
+        assigned_to: snConfig.username,
+        ticket_type: type,
+      };
+      const res: any = await apiService.createProblemTicket(body);
+      const ticketId = res.ticket_id || res.id || `SN-${Date.now()}`;
+      const requestId = res.request_id || res.sys_id || `REQ-${Date.now()}`;
+      setCreateResult({ ticketId, requestId, type, title });
+      addNotification({
+        title: `${type} created`,
+        message: `Ticket ${ticketId} (${requestId}) created in ServiceNow`,
+        status: "success",
+        category: "tenant_sync",
+      });
+      await fetchTickets();
+    } catch {
+      addNotification({ title: "Failed", message: `Could not create ${type} in ServiceNow`, status: "error", category: "tenant_sync" });
+    }
+  };
+
   const filteredAndSortedTickets = useMemo(() => {
     let data = [...tickets];
     if (searchQuery.trim()) {
@@ -164,31 +216,6 @@ export default function ITSMAgentPage() {
     }
     return data;
   }, [tickets, searchQuery, sortConfig]);
-
-  const handleTicketCreate = async (type: string, prompt: string) => {
-    if (!isConnected) {
-      setSnConfigOpen(true);
-      return;
-    }
-    addNotification({ title: `Creating ${type}...`, message: "Submitting to ServiceNow", status: "info", category: "tenant_sync" });
-    try {
-      const ep = type.toLowerCase() as "incident" | "problem";
-      const body: any = {
-        title: `[AI] ${prompt.slice(0, 80)}`,
-        description: prompt,
-        assigned_to: snConfig.username,
-      };
-      let res: any;
-      if (ep === "incident") res = await apiService.createProblemTicket({ ...body, title: body.title });
-      else res = await apiService.createProblemTicket(body);
-      if (res.ticket_id || res.id) {
-        addNotification({ title: `${type} created`, message: `Ticket ${res.ticket_id || res.id} created in ServiceNow`, status: "success", category: "tenant_sync" });
-        await fetchTickets();
-      }
-    } catch {
-      addNotification({ title: "Failed", message: `Could not create ${type} in ServiceNow`, status: "error", category: "tenant_sync" });
-    }
-  };
 
   const quickActions = [
     { label: "Create Incident", prompt: "Create a new incident for [Issue Description] affecting [Service Name] with [Priority Level].", icon: <AlertTriangle className="h-4 w-4 text-red-500" />, iconBg: "bg-red-50 dark:bg-red-900/30" },
@@ -237,7 +264,7 @@ export default function ITSMAgentPage() {
     <div className="min-h-screen bg-gray-50 dark:bg-slate-950 flex">
       <Sidebar />
       <div className="flex-1 lg:ml-[240px] transition-all">
-        <Header showLiveIndicator userName="Harsh Pardhi" />
+        <Header showLiveIndicator />
         <main className="p-4 lg:p-5">
           <div className="max-w-7xl mx-auto">
             {/* Header */}
@@ -265,6 +292,10 @@ export default function ITSMAgentPage() {
                     <Settings className="h-3.5 w-3.5" />
                     ServiceNow Config
                   </Button>
+                  <Button variant="outline" size="sm" onClick={fetchTickets} disabled={ticketsLoading} className="h-8 text-xs gap-1.5">
+                    <RefreshCw className={cn("h-3.5 w-3.5", ticketsLoading && "animate-spin")} />
+                    {ticketsLoading ? "Refreshing..." : "Refresh"}
+                  </Button>
                   <Button variant="ghost" size="sm" onClick={() => router.push('/dashboard')} className="h-8 text-azure-600 dark:text-azure-400">
                     <LayoutDashboardIcon className="h-4 w-4 mr-2" />
                     Dashboard
@@ -284,9 +315,20 @@ export default function ITSMAgentPage() {
               value={chatInput}
               onValueChange={setChatInput}
               onSubmit={(value: string) => {
-                const runs = JSON.parse(localStorage.getItem("assessment_runs") || "[]");
-                runs.push({ id: `run_${Date.now()}`, type: "Custom ITSM", timestamp: Date.now(), status: "completed" });
-                localStorage.setItem("assessment_runs", JSON.stringify(runs));
+                const lower = value.toLowerCase();
+                if (lower.startsWith("create incident") || lower.startsWith("create a new incident")) {
+                  handleTicketCreate("incident", value);
+                } else if (lower.startsWith("service request") || lower.startsWith("create service request") || lower.startsWith("create a new service request")) {
+                  handleTicketCreate("service-request", value);
+                } else if (lower.startsWith("change request") || lower.startsWith("create change request") || lower.startsWith("create a new change request")) {
+                  handleTicketCreate("change-request", value);
+                } else if (lower.startsWith("create problem") || lower.startsWith("create a new problem")) {
+                  handleTicketCreate("problem", value);
+                } else {
+                  const runs = JSON.parse(localStorage.getItem("assessment_runs") || "[]");
+                  runs.push({ id: `run_${Date.now()}`, type: "Custom ITSM", timestamp: Date.now(), status: "completed" });
+                  localStorage.setItem("assessment_runs", JSON.stringify(runs));
+                }
               }}
             />
 
@@ -334,6 +376,102 @@ export default function ITSMAgentPage() {
                         </motion.div>
                       ))}
                     </div>
+                  </CardContent>
+                </Card>
+
+                {/* Auto-Created ServiceNow Tickets */}
+                <Card className="mb-4 border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800">
+                  <CardHeader className="pb-4">
+                    <CardTitle className="text-base font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                      <Database className="h-5 w-5 text-azure-500" />
+                      Auto-Created Tickets
+                      {snTicketStats && (
+                        <div className="flex items-center gap-2 ml-auto">
+                          <span className="text-xs text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 px-2 py-0.5 rounded-full">{snTicketStats.created} Created</span>
+                          {snTicketStats.failed > 0 && (
+                            <span className="text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 px-2 py-0.5 rounded-full">{snTicketStats.failed} Failed</span>
+                          )}
+                        </div>
+                      )}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {snAutoTickets.length === 0 && !snAutoTicketsLoading ? (
+                      <div className="text-center py-6">
+                        <Database className="h-8 w-8 text-gray-300 dark:text-slate-600 mx-auto mb-2" />
+                        <p className="text-xs text-gray-400 dark:text-slate-500">No auto-created tickets yet. Deploy infrastructure to generate ServiceNow tickets automatically.</p>
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full">
+                          <thead>
+                            <tr className="border-b border-gray-200 dark:border-slate-700">
+                              <th className="text-left py-2 px-3 text-xs font-semibold text-gray-500 dark:text-slate-400">Deployment</th>
+                              <th className="text-left py-2 px-3 text-xs font-semibold text-gray-500 dark:text-slate-400">Resource</th>
+                              <th className="text-left py-2 px-3 text-xs font-semibold text-gray-500 dark:text-slate-400">Ticket ID</th>
+                              <th className="text-left py-2 px-3 text-xs font-semibold text-gray-500 dark:text-slate-400">Status</th>
+                              <th className="text-left py-2 px-3 text-xs font-semibold text-gray-500 dark:text-slate-400">Sync</th>
+                              <th className="text-right py-2 px-3 text-xs font-semibold text-gray-500 dark:text-slate-400">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {snAutoTickets.map((t: any) => (
+                              <tr key={t.deploymentId} className="border-b border-gray-100 dark:border-slate-800 hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors">
+                                <td className="py-2 px-3 text-xs font-mono text-azure-600 dark:text-azure-400">{t.deploymentId}</td>
+                                <td className="py-2 px-3">
+                                  <div className="text-xs text-gray-900 dark:text-white">{t.resourceName}</div>
+                                  <div className="text-[10px] text-gray-400 dark:text-slate-500">{t.resourceType}</div>
+                                </td>
+                                <td className="py-2 px-3 text-xs font-mono">
+                                  {t.serviceNowTicketId ? (
+                                    <span className="text-emerald-600 dark:text-emerald-400">{t.serviceNowTicketId}</span>
+                                  ) : (
+                                    <span className="text-gray-400">-</span>
+                                  )}
+                                </td>
+                                <td className="py-2 px-3">
+                                  <span className={cn(
+                                    "text-[10px] px-1.5 py-0.5 rounded-full font-medium",
+                                    t.deploymentStatus === "Succeeded" ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400" : "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400"
+                                  )}>{t.deploymentStatus}</span>
+                                </td>
+                                <td className="py-2 px-3">
+                                  <span className={cn(
+                                    "text-[10px] px-1.5 py-0.5 rounded-full font-medium",
+                                    t.serviceNowSyncStatus === "created" ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400" :
+                                    t.serviceNowSyncStatus === "failed" ? "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400" :
+                                    "bg-gray-100 dark:bg-slate-700 text-gray-500 dark:text-slate-400"
+                                  )}>{t.serviceNowSyncStatus || "skipped"}</span>
+                                </td>
+                                <td className="py-2 px-3 text-right">
+                                  {t.serviceNowSyncStatus === "failed" && (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={async () => {
+                                        try {
+                                          await apiService.retryServiceNowTicket(t.deploymentId);
+                                          await fetchAutoTickets();
+                                        } catch { }
+                                      }}
+                                      className="h-6 text-[10px] gap-1"
+                                    >
+                                      <Repeat className="h-3 w-3" />
+                                      Retry
+                                    </Button>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                            {snAutoTicketsLoading && (
+                              <tr>
+                                <td colSpan={6} className="py-4 text-center text-xs text-gray-400">Loading...</td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
 
@@ -620,6 +758,51 @@ export default function ITSMAgentPage() {
                         </Button>
                       </div>
                     </div>
+                  </div>
+                </motion.div>
+              </>
+            )}
+            </AnimatePresence>
+
+          {/* Creation Result Modal */}
+          <AnimatePresence>
+            {createResult && (
+              <>
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  onClick={() => setCreateResult(null)}
+                  className="fixed inset-0 bg-black/50 z-40"
+                />
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  className="fixed inset-0 flex items-center justify-center z-50 p-4"
+                >
+                  <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-md w-full border border-gray-200 dark:border-slate-700 p-6"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="text-center mb-4">
+                      <CheckCircle className="h-12 w-12 text-emerald-500 mx-auto mb-3" />
+                      <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{createResult.type} Created</h3>
+                      <p className="text-sm text-gray-500 dark:text-slate-400 mt-1">{createResult.title}</p>
+                    </div>
+                    <div className="bg-gray-50 dark:bg-slate-900 rounded-xl p-4 space-y-3 mb-4">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-gray-500 dark:text-slate-400">Ticket ID</span>
+                        <span className="text-sm font-mono font-semibold text-azure-600 dark:text-azure-400">{createResult.ticketId}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-gray-500 dark:text-slate-400">Request ID</span>
+                        <span className="text-sm font-mono font-semibold text-emerald-600 dark:text-emerald-400">{createResult.requestId}</span>
+                      </div>
+                    </div>
+                    <Button size="sm" onClick={() => setCreateResult(null)} className="w-full h-9 text-xs">
+                      <Check className="h-3.5 w-3.5 mr-1.5" />
+                      Done
+                    </Button>
                   </div>
                 </motion.div>
               </>

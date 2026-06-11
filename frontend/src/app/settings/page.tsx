@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { motion, AnimatePresence } from "framer-motion";
@@ -12,7 +12,8 @@ import {
   Database, 
   Bell, 
   Shield, 
-  Sun, 
+  Sun,
+  Moon,
   Users,
   Info,
   Key,
@@ -29,11 +30,21 @@ import {
   Clock,
   CheckCircle,
   Loader,
-  AlertCircle
+  AlertCircle,
+  Brain,
+  Trash2
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useSettingsStore } from "@/store/settingsStore";
+import { useThemeStore } from "@/store/themeStore";
+import { useTenantDataStore } from "@/store/tenantDataStore";
+
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  USD: "$", INR: "₹", EUR: "€", GBP: "£", AED: "د.إ",
+  JPY: "¥", CAD: "C$", AUD: "A$", BRL: "R$", SGD: "S$",
+  HKD: "HK$", KRW: "₩", CHF: "Fr",
+};
 import { UserManagement } from "@/components/settings/UserManagement";
 import { InfrastructureStorageSection } from "@/components/settings/InfrastructureStorageSection";
 import { apiService } from "@/services/api";
@@ -48,7 +59,9 @@ type SettingsSection =
   | "notifications" 
   | "security" 
   | "appearance" 
-  | "users";
+  | "users"
+  | "ai"
+  | "servicenow";
 
 interface SettingsNavItem {
   id: SettingsSection;
@@ -60,6 +73,8 @@ const settingsNavItems: SettingsNavItem[] = [
   { id: "general", label: "General", icon: <LayoutDashboardIcon className="h-4 w-4" /> },
   { id: "customization", label: "Portal Customization", icon: <Palette className="h-4 w-4" /> },
   { id: "agents", label: "Agent Settings", icon: <Bot className="h-4 w-4" /> },
+  { id: "ai", label: "AI Provider", icon: <Brain className="h-4 w-4" /> },
+  { id: "servicenow", label: "ServiceNow", icon: <ExternalLink className="h-4 w-4" /> },
   { id: "infrastructure", label: "Infrastructure State Storage", icon: <Database className="h-4 w-4" /> },
   { id: "redis", label: "Redis & Cache", icon: <Database className="h-4 w-4" /> },
   { id: "notifications", label: "Notifications", icon: <Bell className="h-4 w-4" /> },
@@ -88,6 +103,26 @@ export default function SettingsPage() {
   const [tempMfaEmail, setTempMfaEmail] = useState("");
   const [showMfaPhone, setShowMfaPhone] = useState(false);
   const [showMfaEmail, setShowMfaEmail] = useState(false);
+  // HuggingFace state
+  const [hfApiKey, setHfApiKey] = useState("");
+  const [hfModel, setHfModel] = useState("google/gemma-3-12b-it");
+  const [hfEndpoint, setHfEndpoint] = useState("");
+  const [hfConfigured, setHfConfigured] = useState(false);
+  const [hfSource, setHfSource] = useState("env");
+  const [hfVerifying, setHfVerifying] = useState(false);
+  const [hfTestResult, setHfTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [hfSaving, setHfSaving] = useState(false);
+  // ServiceNow state
+  const [snInstanceUrl, setSnInstanceUrl] = useState("");
+  const [snUsername, setSnUsername] = useState("");
+  const [snPassword, setSnPassword] = useState("");
+  const [snAssignmentGroup, setSnAssignmentGroup] = useState("");
+  const [snConfigured, setSnConfigured] = useState(false);
+  const [snSource, setSnSource] = useState("env");
+  const [snVerifying, setSnVerifying] = useState(false);
+  const [snTestResult, setSnTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [snSaving, setSnSaving] = useState(false);
+  const [showSnPassword, setShowSnPassword] = useState(false);
   // 2FA OTP flow state
   const [otpFlow, setOtpFlow] = useState<'idle' | 'verify_password' | 'choose_method' | 'otp_sent' | 'verified'>('idle');
   const [otpPassword, setOtpPassword] = useState("");
@@ -95,13 +130,13 @@ export default function SettingsPage() {
   const [otpMethod, setOtpMethod] = useState<'sms' | 'email'>('sms');
   const [otpError, setOtpError] = useState("");
   // Login activity tracking store
-  const [loginActivities, setLoginActivities] = useState<{ time: string; platform: string; location: string; ip: string }[]>([]);
+  const [loginActivities, setLoginActivities] = useState<{ type: string; time: string; username: string; browser: string; platform: string; location: string; ip: string }[]>([]);
   useEffect(() => {
     try {
       const stored = localStorage.getItem('login_activities');
       if (stored) setLoginActivities(JSON.parse(stored));
     } catch {}
-  }, []);
+  }, [activeSection]);
   // Settings store
   const { 
     general, 
@@ -118,12 +153,43 @@ export default function SettingsPage() {
     updateInfrastructureStorage
   } = useSettingsStore();
 
+  // Tenant data for usage metrics
+  const { resources, costs, advisor: tenantAdvisor, security: tenantSecurity, loading, fetchAll } = useTenantDataStore();
+  useEffect(() => {
+    if (loading) fetchAll();
+  }, [loading, fetchAll]);
+
+  const usageMetrics = useMemo(() => {
+    const resourceCount = resources?.length ?? 0;
+    const recCount = tenantAdvisor?.recommendations?.length ?? 0;
+    const alertCount = tenantSecurity?.alerts?.length ?? 0;
+    const requests = resourceCount + recCount + alertCount || 0;
+    const tokens = (resourceCount * 80 + recCount * 200 + alertCount * 150) || 0;
+    const cost = costs?.month_to_date;
+    const currency = costs?.currency || "USD";
+    const symbol = CURRENCY_SYMBOLS[currency] ?? `${currency} `;
+    return { requests, tokens, cost, currency, symbol };
+  }, [resources, costs, tenantAdvisor, tenantSecurity]);
+
   // Temporary state for form values
   const [tempGeneral, setTempGeneral] = useState(general);
   const [tempCustomization, setTempCustomization] = useState(customization);
   const [tempNotifications, setTempNotifications] = useState(notifications);
   const [tempSecurity, setTempSecurity] = useState(security);
   const [tempAppearance, setTempAppearance] = useState(appearance);
+
+  // Load agent settings from store when selected agent changes
+  useEffect(() => {
+    const state = useSettingsStore.getState();
+    const keys = Object.keys(state.agents);
+    if (keys.includes(selectedAgent)) {
+      const agent = (state.agents as any)[selectedAgent];
+      setTempAgentEndpoint(agent.azureEndpoint || "");
+      setTempAgentKey(agent.openaiApiKey || "");
+      setTempAgentDeployment(agent.model || "");
+      setTempAgentApiVersion(agent.apiVersion || "2024-02-15-preview");
+    }
+  }, [selectedAgent]);
 
   // Sync temporary state with store when section changes
   useEffect(() => {
@@ -136,13 +202,56 @@ export default function SettingsPage() {
     setLogoPreview(customization.logoUrl);
   }, [activeSection, general, customization, notifications, security, appearance]);
 
-  // Apply appearance settings as CSS custom properties
+  // Apply appearance CSS variables (preview-only; persisted by providers.tsx)
   useEffect(() => {
+    const root = document.documentElement;
+    root.style.setProperty('--primary-color', tempCustomization.primaryColor);
+    root.style.setProperty('--accent-color', tempCustomization.accentColor);
+    root.style.setProperty('--border-radius', `${tempCustomization.borderRadius}px`);
+    root.setAttribute('data-glassmorphism', String(tempCustomization.glassmorphismEnabled));
+    root.setAttribute('data-compact', String(tempCustomization.compactMode));
     const intensityMap = { low: 0.25, medium: 0.5, high: 0.75 };
-    document.documentElement.style.setProperty('--ui-opacity', String(appearance.transparencyLevel / 100));
-    document.documentElement.style.setProperty('--sidebar-width', appearance.compactSidebar ? '16rem' : '18rem');
-    document.documentElement.style.setProperty('--anim-intensity', String(intensityMap[appearance.animationIntensity]));
-  }, [appearance]);
+    root.style.setProperty('--ui-opacity', String(tempAppearance.transparencyLevel / 100));
+    root.style.setProperty('--sidebar-width', tempAppearance.compactSidebar ? '16rem' : '18rem');
+    root.style.setProperty('--anim-intensity', String(intensityMap[tempAppearance.animationIntensity]));
+  }, [tempCustomization, tempAppearance]);
+
+  // Load HuggingFace config when AI section is active
+  useEffect(() => {
+    if (activeSection === "ai") {
+      (async () => {
+        try {
+          const res: any = await apiService.getHuggingFaceConfig();
+          setHfConfigured(res.configured);
+          setHfSource(res.source || "env");
+          setHfModel(res.model || "google/gemma-3-12b-it");
+          setHfEndpoint(res.endpoint || "");
+        } catch {
+          setHfConfigured(false);
+        }
+      })();
+    }
+  }, [activeSection]);
+
+  // Load ServiceNow config when ServiceNow section is active
+  useEffect(() => {
+    if (activeSection === "servicenow") {
+      (async () => {
+        try {
+          const res: any = await apiService.getServiceNowConfig();
+          setSnConfigured(res.configured);
+          setSnSource(res.source || "env");
+          setSnInstanceUrl(res.instance_url || "");
+          setSnUsername(res.username || "");
+          setSnAssignmentGroup(res.assignment_group || "");
+        } catch {
+          setSnConfigured(false);
+        }
+      })();
+    }
+  }, [activeSection]);
+
+  const { theme: currentTheme, setTheme } = useThemeStore();
 
   const handleSave = () => {
     // Save all temporary states to store
@@ -152,6 +261,11 @@ export default function SettingsPage() {
     updateSecurity(tempSecurity);
     updateAppearance(tempAppearance);
     setHasChanges(false);
+
+    // Sync theme to themeStore
+    if (tempAppearance.theme !== currentTheme) {
+      setTheme(tempAppearance.theme);
+    }
     
     // Show success message (could be enhanced with toast)
     console.log('Settings saved successfully');
@@ -257,7 +371,7 @@ export default function SettingsPage() {
       <Sidebar />
       
       <div className="flex-1 lg:ml-[240px] transition-all">
-        <Header showLiveIndicator userName="Harsh Pardhi" />
+        <Header showLiveIndicator />
         
         <main className="p-4 lg:p-5">
           <div className="max-w-7xl mx-auto">
@@ -703,16 +817,13 @@ export default function SettingsPage() {
                             <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
                               API Version
                             </label>
-                            <select
+                            <input
+                              type="text"
                               value={tempAgentApiVersion}
                               onChange={(e) => setTempAgentApiVersion(e.target.value)}
+                              placeholder="2024-02-15-preview"
                               className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-azure-500 text-xs"
-                            >
-                              <option value="2024-02-15-preview">2024-02-15-preview</option>
-                              <option value="2024-03-01-preview">2024-03-01-preview</option>
-                              <option value="2024-06-01">2024-06-01</option>
-                              <option value="2024-08-01-preview">2024-08-01-preview</option>
-                            </select>
+                            />
                           </div>
                         </div>
 
@@ -760,6 +871,7 @@ export default function SettingsPage() {
                                 azureEndpoint: tempAgentEndpoint,
                                 openaiApiKey: tempAgentKey,
                                 model: tempAgentDeployment,
+                                apiVersion: tempAgentApiVersion,
                               });
                               setHasChanges(true);
                             }}
@@ -789,33 +901,27 @@ export default function SettingsPage() {
                           <Activity className="h-4 w-4 text-azure-500" />
                           Usage Metrics
                         </h4>
-                        {tempAgentEndpoint ? (
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                            <div className="bg-gray-50 dark:bg-slate-900 rounded-lg p-3 text-center">
-                              <p className="text-xs text-gray-500 dark:text-slate-400 mb-1">Tokens Used</p>
-                              <p className="text-lg font-bold text-gray-900 dark:text-white">1.2M</p>
-                            </div>
-                            <div className="bg-gray-50 dark:bg-slate-900 rounded-lg p-3 text-center">
-                              <p className="text-xs text-gray-500 dark:text-slate-400 mb-1">Requests</p>
-                              <p className="text-lg font-bold text-gray-900 dark:text-white">8,450</p>
-                            </div>
-                            <div className="bg-gray-50 dark:bg-slate-900 rounded-lg p-3 text-center">
-                              <p className="text-xs text-gray-500 dark:text-slate-400 mb-1">Avg Latency</p>
-                              <p className="text-lg font-bold text-gray-900 dark:text-white">320ms</p>
-                            </div>
-                            <div className="bg-gray-50 dark:bg-slate-900 rounded-lg p-3 text-center">
-                              <p className="text-xs text-gray-500 dark:text-slate-400 mb-1">Success Rate</p>
-                              <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400">99.8%</p>
-                            </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                          <div className="bg-gray-50 dark:bg-slate-900 rounded-lg p-3 text-center">
+                            <p className="text-xs text-gray-500 dark:text-slate-400 mb-1">Requests</p>
+                            <p className="text-lg font-bold text-gray-900 dark:text-white">{usageMetrics.requests.toLocaleString()}</p>
+                            <p className="text-[10px] text-gray-400 dark:text-slate-500 mt-0.5">Resources + recommendations + alerts</p>
                           </div>
-                        ) : (
-                          <div className="text-center py-6">
-                            <Bot className="h-8 w-8 mx-auto text-gray-400 mb-2" />
-                            <p className="text-xs text-gray-500 dark:text-slate-400">
-                              Configure Azure OpenAI credentials above to see usage metrics
+                          <div className="bg-gray-50 dark:bg-slate-900 rounded-lg p-3 text-center">
+                            <p className="text-xs text-gray-500 dark:text-slate-400 mb-1">Tokens</p>
+                            <p className="text-lg font-bold text-gray-900 dark:text-white">{usageMetrics.tokens.toLocaleString()}</p>
+                            <p className="text-[10px] text-gray-400 dark:text-slate-500 mt-0.5">Estimated from synced data volume</p>
+                          </div>
+                          <div className="bg-gray-50 dark:bg-slate-900 rounded-lg p-3 text-center">
+                            <p className="text-xs text-gray-500 dark:text-slate-400 mb-1">Cost</p>
+                            <p className="text-lg font-bold text-gray-900 dark:text-white">
+                              {usageMetrics.cost != null
+                                ? `${usageMetrics.symbol}${usageMetrics.cost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                : "--"}
                             </p>
+                            <p className="text-[10px] text-gray-400 dark:text-slate-500 mt-0.5">Current month Azure spend</p>
                           </div>
-                        )}
+                        </div>
                       </div>
                     </div>
                   )}
@@ -825,6 +931,481 @@ export default function SettingsPage() {
                       settings={infrastructureStorage}
                       onUpdate={updateInfrastructureStorage}
                     />
+                  )}
+
+                  {activeSection === "ai" && (
+                    <div>
+                      <div className="flex items-center justify-between mb-4">
+                        <div>
+                          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                            AI Provider
+                          </h2>
+                          <p className="text-sm text-gray-500 dark:text-slate-400 mt-1">
+                            Configure HuggingFace as your AI provider. Changes take effect immediately across the entire portal.
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className={cn(
+                            "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium",
+                            hfConfigured
+                              ? "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400"
+                              : "bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400"
+                          )}>
+                            <span className={cn(
+                              "w-1.5 h-1.5 rounded-full",
+                              hfConfigured ? "bg-emerald-500" : "bg-amber-500"
+                            )} />
+                            {hfConfigured ? "Active" : "Not Configured"}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* HuggingFace Configuration */}
+                      <div className="space-y-4 mb-6">
+                        <h4 className="text-sm font-semibold text-gray-900 dark:text-white border-b border-gray-200 dark:border-slate-700 pb-2">
+                          HuggingFace Connection
+                        </h4>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
+                            API Key <span className="text-red-500">*</span>
+                          </label>
+                          <div className="relative">
+                            <input
+                              type={showKey ? "text" : "password"}
+                              value={hfApiKey}
+                              onChange={(e) => { setHfApiKey(e.target.value); setHfTestResult(null); }}
+                              placeholder="hf_... or your HuggingFace API token"
+                              className="w-full px-3 py-2 pr-10 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-azure-500 text-xs"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowKey(!showKey)}
+                              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                            >
+                              {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                            </button>
+                          </div>
+                          <p className="text-xs text-gray-400 dark:text-slate-500 mt-1">
+                            Get your token from <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener noreferrer" className="text-azure-500 hover:underline">huggingface.co/settings/tokens</a>
+                          </p>
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
+                            Model
+                          </label>
+                          <input
+                            type="text"
+                            value={hfModel}
+                            onChange={(e) => { setHfModel(e.target.value); setHfTestResult(null); }}
+                            placeholder="google/gemma-3-12b-it"
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-azure-500 text-xs"
+                          />
+                          <p className="text-xs text-gray-400 dark:text-slate-500 mt-1">
+                            Any OpenAI-compatible model on HuggingFace Hub (e.g., google/gemma-3-12b-it, mistralai/Mistral-7B-Instruct)
+                          </p>
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
+                            Custom Endpoint (optional)
+                          </label>
+                          <input
+                            type="text"
+                            value={hfEndpoint}
+                            onChange={(e) => { setHfEndpoint(e.target.value); setHfTestResult(null); }}
+                            placeholder="https://your-endpoint.hf.space/v1/chat/completions"
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-azure-500 text-xs"
+                          />
+                          <p className="text-xs text-gray-400 dark:text-slate-500 mt-1">
+                            Leave empty to use the HuggingFace Inference API. Set for dedicated Inference Endpoints.
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-3 pt-2">
+                          <Button
+                            size="sm"
+                            onClick={async () => {
+                              setHfVerifying(true);
+                              setHfTestResult(null);
+                              try {
+                                if (hfApiKey) {
+                                  await apiService.saveHuggingFaceConfig({
+                                    api_key: hfApiKey,
+                                    model: hfModel || "google/gemma-3-12b-it",
+                                    endpoint: hfEndpoint || undefined,
+                                  });
+                                }
+                                const res: any = await apiService.testHuggingFace();
+                                setHfTestResult({
+                                  success: res.connected,
+                                  message: res.message || (res.connected ? "Connected!" : "Connection failed"),
+                                });
+                              } catch (e: any) {
+                                setHfTestResult({ success: false, message: e?.message || "Connection failed" });
+                              } finally {
+                                setHfVerifying(false);
+                              }
+                            }}
+                            disabled={!hfApiKey || hfVerifying}
+                            className="h-8 text-xs"
+                          >
+                            {hfVerifying ? (
+                              <Loader className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                            ) : (
+                              <Check className="h-3.5 w-3.5 mr-1.5" />
+                            )}
+                            {hfVerifying ? "Testing..." : "Test & Activate"}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={async () => {
+                              setHfSaving(true);
+                              try {
+                                await apiService.saveHuggingFaceConfig({
+                                  api_key: hfApiKey,
+                                  model: hfModel || "google/gemma-3-12b-it",
+                                  endpoint: hfEndpoint || undefined,
+                                });
+                                setHfConfigured(true);
+                                setHfSource("redis");
+                                setHfTestResult({ success: true, message: "Configuration saved and activated across all agents!" });
+                              } catch (e: any) {
+                                setHfTestResult({ success: false, message: e?.message || "Save failed" });
+                              } finally {
+                                setHfSaving(false);
+                              }
+                            }}
+                            disabled={!hfApiKey || hfSaving}
+                            className="h-8 text-xs"
+                          >
+                            {hfSaving ? (
+                              <Loader className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                            ) : (
+                              <Key className="h-3.5 w-3.5 mr-1.5" />
+                            )}
+                            {hfSaving ? "Saving..." : "Save & Activate"}
+                          </Button>
+                          {hfConfigured && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={async () => {
+                                try {
+                                  await apiService.clearHuggingFaceConfig();
+                                  setHfApiKey("");
+                                  setHfModel("google/gemma-3-12b-it");
+                                  setHfEndpoint("");
+                                  setHfConfigured(false);
+                                  setHfSource("env");
+                                  setHfTestResult({ success: true, message: "Configuration cleared, using env vars" });
+                                } catch (e: any) {
+                                  setHfTestResult({ success: false, message: e?.message || "Clear failed" });
+                                }
+                              }}
+                              className="h-8 text-xs text-red-600 border-red-300 hover:bg-red-50 dark:border-red-800 dark:hover:bg-red-900/20"
+                            >
+                              <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+                              Clear Config
+                            </Button>
+                          )}
+                        </div>
+
+                        {hfTestResult && (
+                          <div className={cn(
+                            "flex items-center gap-2 mt-2 text-xs px-3 py-2 rounded-lg",
+                            hfTestResult.success
+                              ? "text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20"
+                              : "text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20"
+                          )}>
+                            {hfTestResult.success ? <CheckCircle className="h-3.5 w-3.5 flex-shrink-0" /> : <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />}
+                            {hfTestResult.message}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Status Cards */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        <div className="bg-gray-50 dark:bg-slate-900 rounded-lg p-4">
+                          <p className="text-xs text-gray-500 dark:text-slate-400 mb-1">Status</p>
+                          <p className={cn(
+                            "text-sm font-semibold",
+                            hfConfigured ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"
+                          )}>
+                            {hfConfigured ? "Active" : "Inactive"}
+                          </p>
+                        </div>
+                        <div className="bg-gray-50 dark:bg-slate-900 rounded-lg p-4">
+                          <p className="text-xs text-gray-500 dark:text-slate-400 mb-1">Active Model</p>
+                          <p className="text-sm font-semibold text-gray-900 dark:text-white truncate" title={hfModel}>
+                            {hfModel || "google/gemma-3-12b-it"}
+                          </p>
+                        </div>
+                        <div className="bg-gray-50 dark:bg-slate-900 rounded-lg p-4">
+                          <p className="text-xs text-gray-500 dark:text-slate-400 mb-1">Source</p>
+                          <p className="text-sm font-semibold text-gray-900 dark:text-white capitalize">
+                            {hfSource}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Info Banner */}
+                      <div className="mt-6 bg-azure-50 dark:bg-azure-900/20 border border-azure-200 dark:border-azure-800 rounded-lg p-4">
+                        <div className="flex items-start gap-3">
+                          <Brain className="h-5 w-5 text-azure-600 dark:text-azure-400 flex-shrink-0 mt-0.5" />
+                          <div>
+                            <h4 className="text-sm font-semibold text-azure-800 dark:text-azure-300 mb-1">
+                              How it works
+                            </h4>
+                            <p className="text-xs text-azure-700 dark:text-azure-400">
+                              Your HuggingFace configuration is stored in Redis and applied immediately across all portal services — InfraMini assistant, provisioning, assessment, migration, observability, optimization, troubleshooting, ITSM, and compliance agents. No restart needed. Set <code className="px-1 py-0.5 bg-azure-100 dark:bg-azure-900/40 rounded text-[11px]">AI_PROVIDER=huggingface</code> in your env to make HuggingFace the default.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {activeSection === "servicenow" && (
+                    <div>
+                      <div className="flex items-center justify-between mb-4">
+                        <div>
+                          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                            ServiceNow Configuration
+                          </h2>
+                          <p className="text-sm text-gray-500 dark:text-slate-400 mt-1">
+                            Configure ServiceNow for automatic ticket creation on infrastructure changes. Changes take effect immediately.
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className={cn(
+                            "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium",
+                            snConfigured
+                              ? "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400"
+                              : "bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400"
+                          )}>
+                            <span className={cn(
+                              "w-1.5 h-1.5 rounded-full",
+                              snConfigured ? "bg-emerald-500" : "bg-amber-500"
+                            )} />
+                            {snConfigured ? "Configured" : "Not Configured"}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="space-y-4 mb-6">
+                        <h4 className="text-sm font-semibold text-gray-900 dark:text-white border-b border-gray-200 dark:border-slate-700 pb-2">
+                          ServiceNow Connection
+                        </h4>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
+                            Instance URL <span className="text-red-500">*</span>
+                          </label>
+                          <input
+                            type="text"
+                            value={snInstanceUrl}
+                            onChange={(e) => { setSnInstanceUrl(e.target.value); setSnTestResult(null); }}
+                            placeholder="https://your-instance.service-now.com"
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-azure-500 text-xs"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
+                            Username <span className="text-red-500">*</span>
+                          </label>
+                          <input
+                            type="text"
+                            value={snUsername}
+                            onChange={(e) => { setSnUsername(e.target.value); setSnTestResult(null); }}
+                            placeholder="admin"
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-azure-500 text-xs"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
+                            Password / API Token <span className="text-red-500">*</span>
+                          </label>
+                          <div className="relative">
+                            <input
+                              type={showSnPassword ? "text" : "password"}
+                              value={snPassword}
+                              onChange={(e) => { setSnPassword(e.target.value); setSnTestResult(null); }}
+                              placeholder="••••••••••••••••"
+                              className="w-full px-3 py-2 pr-10 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-azure-500 text-xs"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowSnPassword(!showSnPassword)}
+                              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                            >
+                              {showSnPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                            </button>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
+                            Assignment Group (optional)
+                          </label>
+                          <input
+                            type="text"
+                            value={snAssignmentGroup}
+                            onChange={(e) => { setSnAssignmentGroup(e.target.value); setSnTestResult(null); }}
+                            placeholder="Infrastructure Team"
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-azure-500 text-xs"
+                          />
+                          <p className="text-xs text-gray-400 dark:text-slate-500 mt-1">
+                            ServiceNow group to assign tickets to. Default: Infrastructure Team
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-3 pt-2">
+                          <Button
+                            size="sm"
+                            onClick={async () => {
+                              setSnVerifying(true);
+                              setSnTestResult(null);
+                              try {
+                                const res: any = await apiService.testServiceNow({
+                                  instance_url: snInstanceUrl,
+                                  username: snUsername,
+                                  password: snPassword,
+                                });
+                                setSnTestResult({
+                                  success: res.connected,
+                                  message: res.message || (res.connected ? "Connected to ServiceNow!" : "Connection failed"),
+                                });
+                              } catch (e: any) {
+                                setSnTestResult({ success: false, message: e?.message || "Connection failed" });
+                              } finally {
+                                setSnVerifying(false);
+                              }
+                            }}
+                            disabled={!snInstanceUrl || !snUsername || !snPassword || snVerifying}
+                            className="h-8 text-xs"
+                          >
+                            {snVerifying ? (
+                              <Loader className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                            ) : (
+                              <Activity className="h-3.5 w-3.5 mr-1.5" />
+                            )}
+                            {snVerifying ? "Testing..." : "Test Connection"}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={async () => {
+                              setSnSaving(true);
+                              try {
+                                await apiService.saveServiceNowConfig({
+                                  instance_url: snInstanceUrl,
+                                  username: snUsername,
+                                  password: snPassword,
+                                  assignment_group: snAssignmentGroup,
+                                });
+                                setSnConfigured(true);
+                                setSnSource("redis");
+                                setSnTestResult({ success: true, message: "ServiceNow configuration saved and activated!" });
+                              } catch (e: any) {
+                                setSnTestResult({ success: false, message: e?.message || "Save failed" });
+                              } finally {
+                                setSnSaving(false);
+                              }
+                            }}
+                            disabled={!snInstanceUrl || !snUsername || !snPassword || snSaving}
+                            className="h-8 text-xs"
+                          >
+                            {snSaving ? (
+                              <Loader className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                            ) : (
+                              <Key className="h-3.5 w-3.5 mr-1.5" />
+                            )}
+                            {snSaving ? "Saving..." : "Save & Activate"}
+                          </Button>
+                          {snConfigured && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={async () => {
+                                try {
+                                  await apiService.clearServiceNowConfig();
+                                  setSnInstanceUrl("");
+                                  setSnUsername("");
+                                  setSnPassword("");
+                                  setSnAssignmentGroup("");
+                                  setSnConfigured(false);
+                                  setSnSource("env");
+                                  setSnTestResult({ success: true, message: "Configuration cleared" });
+                                } catch (e: any) {
+                                  setSnTestResult({ success: false, message: e?.message || "Clear failed" });
+                                }
+                              }}
+                              className="h-8 text-xs text-red-600 border-red-300 hover:bg-red-50 dark:border-red-800 dark:hover:bg-red-900/20"
+                            >
+                              <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+                              Clear Config
+                            </Button>
+                          )}
+                        </div>
+
+                        {snTestResult && (
+                          <div className={cn(
+                            "flex items-center gap-2 mt-2 text-xs px-3 py-2 rounded-lg",
+                            snTestResult.success
+                              ? "text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20"
+                              : "text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20"
+                          )}>
+                            {snTestResult.success ? <CheckCircle className="h-3.5 w-3.5 flex-shrink-0" /> : <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />}
+                            {snTestResult.message}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Status Cards */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        <div className="bg-gray-50 dark:bg-slate-900 rounded-lg p-4">
+                          <p className="text-xs text-gray-500 dark:text-slate-400 mb-1">Status</p>
+                          <p className={cn(
+                            "text-sm font-semibold",
+                            snConfigured ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"
+                          )}>
+                            {snConfigured ? "Configured" : "Not Configured"}
+                          </p>
+                        </div>
+                        <div className="bg-gray-50 dark:bg-slate-900 rounded-lg p-4">
+                          <p className="text-xs text-gray-500 dark:text-slate-400 mb-1">Source</p>
+                          <p className="text-sm font-semibold text-gray-900 dark:text-white capitalize">
+                            {snSource}
+                          </p>
+                        </div>
+                        <div className="bg-gray-50 dark:bg-slate-900 rounded-lg p-4">
+                          <p className="text-xs text-gray-500 dark:text-slate-400 mb-1">Assignment Group</p>
+                          <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">
+                            {snAssignmentGroup || "Default Group"}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Info Banner */}
+                      <div className="mt-6 bg-azure-50 dark:bg-azure-900/20 border border-azure-200 dark:border-azure-800 rounded-lg p-4">
+                        <div className="flex items-start gap-3">
+                          <ExternalLink className="h-5 w-5 text-azure-600 dark:text-azure-400 flex-shrink-0 mt-0.5" />
+                          <div>
+                            <h4 className="text-sm font-semibold text-azure-800 dark:text-azure-300 mb-1">
+                              Automatic ticket creation
+                            </h4>
+                            <p className="text-xs text-azure-700 dark:text-azure-400">
+                              Once configured, InfraLift automatically creates ServiceNow Change Requests for all infrastructure actions (create, modify, delete). Deployment failures generate Incidents. Tickets are created asynchronously — deployment performance is not affected. View auto-created tickets in the ITSM page.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                   )}
 
                   {activeSection === "redis" && (
@@ -1016,16 +1597,30 @@ export default function SettingsPage() {
                             {loginActivities.length > 0 ? (
                               loginActivities.map((login, i) => (
                                 <div key={i} className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors">
-                                  <div className="flex items-center gap-3">
-                                    <div className="w-8 h-8 rounded-full bg-gray-100 dark:bg-slate-700 flex items-center justify-center">
-                                      <Monitor className="h-4 w-4 text-gray-500 dark:text-slate-400" />
+                                  <div className="flex items-center gap-3 min-w-0">
+                                    <div className={cn(
+                                      "w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0",
+                                      login.type === "logout"
+                                        ? "bg-red-100 dark:bg-red-900/30"
+                                        : "bg-gray-100 dark:bg-slate-700"
+                                    )}>
+                                      <Monitor className={cn(
+                                        "h-4 w-4",
+                                        login.type === "logout"
+                                          ? "text-red-500 dark:text-red-400"
+                                          : "text-gray-500 dark:text-slate-400"
+                                      )} />
                                     </div>
-                                    <div>
-                                      <p className="text-sm font-medium text-gray-900 dark:text-white">{login.platform}</p>
-                                      <p className="text-xs text-gray-500 dark:text-slate-400">{login.location} · {login.ip}</p>
+                                    <div className="min-w-0">
+                                      <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
+                                        {login.type === "logout" ? "Sign Out" : "Sign In"}
+                                      </p>
+                                      <p className="text-xs text-gray-500 dark:text-slate-400 truncate">
+                                        {login.username} · {login.browser}
+                                      </p>
                                     </div>
                                   </div>
-                                  <span className="text-xs text-gray-500 dark:text-slate-400">{login.time}</span>
+                                  <span className="text-xs text-gray-500 dark:text-slate-400 flex-shrink-0 ml-2">{login.time}</span>
                                 </div>
                               ))
                             ) : (
@@ -1046,29 +1641,33 @@ export default function SettingsPage() {
                         Customize the visual appearance of the portal
                       </p>
                       <div className="space-y-4">
-                        <div className="flex items-center justify-between py-2">
-                          <div>
-                            <label className="text-sm font-medium text-gray-700 dark:text-slate-300">
-                              Dark Mode
-                            </label>
-                            <p className="text-xs text-gray-500 dark:text-slate-400">
-                              Switch between light and dark themes
-                            </p>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">
+                            Theme
+                          </label>
+                          <p className="text-xs text-gray-500 dark:text-slate-400 mb-3">
+                            Choose between light, dark, or system default
+                          </p>
+                          <div className="flex gap-2">
+                              {(["light", "dark", "system"] as const).map((mode) => (
+                              <button
+                                key={mode}
+                                onClick={() => {
+                                  handleFieldChange("appearance", "theme", mode);
+                                  handleFieldChange("appearance", "darkMode", mode === "dark" || (mode === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches));
+                                }}
+                                className={cn(
+                                  "flex-1 flex items-center justify-center gap-2 px-3 py-2.5 text-sm font-medium rounded-lg border transition-all",
+                                  tempAppearance.theme === mode
+                                    ? "bg-azure-50 dark:bg-azure-900/30 border-azure-500 text-azure-700 dark:text-azure-300"
+                                    : "bg-white dark:bg-slate-900 border-gray-300 dark:border-slate-600 text-gray-700 dark:text-slate-300 hover:border-gray-400 dark:hover:border-slate-500"
+                                )}
+                              >
+                                {mode === "light" ? <Sun className="h-4 w-4" /> : mode === "dark" ? <Moon className="h-4 w-4" /> : <Monitor className="h-4 w-4" />}
+                                {mode.charAt(0).toUpperCase() + mode.slice(1)}
+                              </button>
+                            ))}
                           </div>
-                          <button
-                            onClick={() => handleFieldChange('appearance', 'darkMode', !tempAppearance.darkMode)}
-                            className={cn(
-                              "relative inline-flex h-6 w-11 items-center rounded-full transition-colors",
-                              tempAppearance.darkMode ? "bg-azure-500" : "bg-gray-300 dark:bg-slate-600"
-                            )}
-                          >
-                            <span
-                              className={cn(
-                                "inline-block h-4 w-4 transform rounded-full bg-white transition-transform",
-                                tempAppearance.darkMode ? "translate-x-6" : "translate-x-1"
-                              )}
-                            />
-                          </button>
                         </div>
 
                         <div>

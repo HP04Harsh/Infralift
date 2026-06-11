@@ -17,6 +17,7 @@ import { useRouter } from "next/navigation";
 import { useTenantDataStore } from "@/store/tenantDataStore";
 import { apiService } from "@/services/api";
 import { useNotificationStore } from "@/store/notificationStore";
+import { useSettingsStore } from "@/store/settingsStore";
 
 interface Ticket {
   ticket_id: string;
@@ -38,6 +39,9 @@ interface AlertItem {
   status: string;
   description: string;
   resource_identifiers: string[];
+  timeGenerated?: string;
+  createdTimeUtc?: string;
+  time?: string;
 }
 
 interface IssueItem {
@@ -49,6 +53,8 @@ interface IssueItem {
   source: "alert" | "ticket" | "serviceHealth";
   assignee: string;
   time: string;
+  created_date: string;
+  resolved_date: string;
   raw: Ticket | AlertItem | any;
 }
 
@@ -112,6 +118,8 @@ export default function TroubleshootAgentPage() {
         source: "alert",
         assignee: "System",
         time: new Date().toLocaleDateString(),
+        created_date: a.timeGenerated || a.createdTimeUtc || a.time || "",
+        resolved_date: a.status === "Resolved" ? a.timeGenerated || a.createdTimeUtc || "" : "",
         raw: a,
       });
     });
@@ -127,6 +135,8 @@ export default function TroubleshootAgentPage() {
         source: "ticket",
         assignee: t.assigned_to || "Unassigned",
         time: t.created_at ? new Date(t.created_at).toLocaleDateString() : "",
+        created_date: t.created_at || "",
+        resolved_date: (t.status === "resolved" || t.status === "closed") ? t.updated_at || "" : "",
         raw: t,
       });
     });
@@ -159,9 +169,28 @@ export default function TroubleshootAgentPage() {
 
   /* ── Resolution Stats ── */
   const resolutionStats = useMemo(() => {
-    const open = tickets.filter((t) => t.status === "open" || t.status === "in_progress").length + (security?.alerts?.filter((a: any) => a.status !== "Resolved")?.length ?? 0);
-    const resolved = tickets.filter((t) => t.status === "resolved" || t.status === "closed").length + (security?.alerts?.filter((a: any) => a.status === "Resolved")?.length ?? 0);
-    const escalated = tickets.filter((t) => t.status === "escalated").length;
+    const fifteenDaysAgo = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000);
+
+    const openTickets = tickets.filter((t) => t.status === "open" || t.status === "in_progress");
+    const openAlerts = security?.alerts?.filter((a: any) => a.status !== "Resolved") ?? [];
+    const open = openTickets.length + openAlerts.length;
+
+    const resolved = tickets.filter((t) => t.status === "resolved" || t.status === "closed").length
+      + (security?.alerts?.filter((a: any) => a.status === "Resolved")?.length ?? 0);
+
+    const escalated = tickets.filter((t) => {
+      if (t.status === "open" || t.status === "in_progress") {
+        const created = t.created_at ? new Date(t.created_at).getTime() : 0;
+        return created > 0 && created < fifteenDaysAgo.getTime();
+      }
+      return false;
+    }).length + (security?.alerts?.filter((a: any) => {
+      if (a.status !== "Resolved") {
+        const created = a.timeGenerated || a.createdTimeUtc || a.time;
+        return created && new Date(created).getTime() < fifteenDaysAgo.getTime();
+      }
+      return false;
+    })?.length ?? 0);
 
     let totalMinutes = 0;
     let resolvedCount = 0;
@@ -185,104 +214,114 @@ export default function TroubleshootAgentPage() {
     return { open, resolved, escalated, avgMins, avgDisplay };
   }, [tickets, security]);
 
-  /* ── Issue Summary ── */
-  const issueSummary = useMemo(() => {
-    const bySev: Record<string, number> = {};
-    const alerts = security?.alerts ?? [];
-    const allAlertSevs: string[] = [];
-    alerts.forEach((a: any) => {
-      const s = a.severity?.toLowerCase() || "low";
-      allAlertSevs.push(s);
-    });
-    tickets.forEach((t) => {
-      const s = t.priority?.toLowerCase() || "low";
-      allAlertSevs.push(s);
-    });
-
-    allAlertSevs.forEach((s) => {
-      if (s === "high" || s === "critical") bySev["critical"] = (bySev["critical"] ?? 0) + 1;
-      else if (s === "medium") bySev["warning"] = (bySev["warning"] ?? 0) + 1;
-      else bySev["info"] = (bySev["info"] ?? 0) + 1;
-    });
-
-    return { critical: bySev["critical"] ?? 0, warning: bySev["warning"] ?? 0, info: bySev["info"] ?? 0 };
-  }, [tickets, security]);
-
   /* ── AI Troubleshooting flow ── */
+  const [planId, setPlanId] = useState<string | null>(null);
+  const [planSteps, setPlanSteps] = useState<any[]>([]);
+  const [stepResults, setStepResults] = useState<Record<number, any>>({});
+
   const startRemedy = async (issue: IssueItem) => {
     setSelectedIssue(issue);
     setRemedyLog([]);
+    setStepResults({});
     setRemedyStage("analyzing_logs");
-    setRemedyAction(`Analyzing logs for ${issue.resource}...`);
+    setRemedyAction(`Analyzing issue: ${issue.title}...`);
     addLog(`Starting automated troubleshooting for "${issue.title}"`);
     addLog(`Source: ${issue.source} | Resource: ${issue.resource}`);
 
-    await delay(800);
-    setRemedyStage("analyzing_metrics");
-    setRemedyAction("Analyzing Azure Monitor metrics...");
-    addLog("Querying Azure Monitor for recent metrics data...");
     try {
-      const ctx = { issue: issue.title, resource: issue.resource, stats, resources: resources?.length };
-      await apiService.analyzeWithAI(issue.title, ctx as any);
-      addLog("Metrics analysis complete: CPU spikes correlated with memory pressure");
-    } catch { addLog("Metrics analysis completed with partial data"); }
-
-    await delay(700);
-    setRemedyStage("identifying_root_cause");
-    setRemedyAction("Identifying root cause...");
-    addLog("Cross-referencing logs, metrics, and configuration...");
-    await delay(900);
-    addLog("Root cause identified: Resource contention on shared infrastructure");
-
-    await delay(500);
-    setRemedyStage("generating_fix");
-    setRemedyAction("Generating remediation plan...");
-    addLog("Generating step-by-step fix plan...");
-    await delay(600);
-    addLog("Remediation plan: Restart resource → Verify connectivity → Apply configuration fix");
-
-    setRemedyStage("awaiting_approval");
-    setRemedyAction("Waiting for approval...");
-    addLog("Approval required before executing remediation");
+      const ctx = {
+        has_alerts: (security?.alerts?.length ?? 0) > 0,
+        has_advisor: (useTenantDataStore.getState().advisor?.recommendations?.length ?? 0) > 0,
+        has_compliance: ((useTenantDataStore.getState().compliance as any)?.policy_violations?.length ?? 0) > 0,
+        total_resources: resources?.length ?? 0,
+      };
+      const res: any = await apiService.analyzeTroubleshootIssue({
+        issue_title: issue.title,
+        issue_resource: issue.resource,
+        issue_source: issue.source,
+        context: ctx,
+      });
+      if (!res?.success || !res?.plan) {
+        throw new Error(res?.error || "Analysis failed");
+      }
+      const plan = res.plan;
+      setPlanId(plan.plan_id);
+      setPlanSteps(plan.steps || []);
+      addLog(`Analysis complete: ${plan.steps?.length || 0} remediation steps identified`);
+      plan.steps?.forEach((step: any, i: number) => {
+        addLog(`  Step ${i + 1}: ${step.description}`);
+      });
+      setRemedyStage("awaiting_approval");
+      setRemedyAction("Review the remediation plan and approve to execute");
+      addLog("Remediation plan ready for review");
+    } catch (e: any) {
+      addLog(`Analysis failed: ${e.message || "Unknown error"}`);
+      addLog("Remediation unavailable. Review the issue manually.");
+      setRemedyStage("failed");
+      setRemedyAction("Analysis could not be completed");
+    }
   };
 
   const executeRemedy = async () => {
+    if (!planId) return;
     setRemedyStage("executing");
-    setRemedyAction("Executing remediation...");
-    addLog("Executing step 1: Restarting resource...");
-    await delay(1000);
-    addLog("Step 1 complete: Resource restarted successfully");
-    addLog("Executing step 2: Verifying connectivity...");
-    await delay(800);
-    addLog("Step 2 complete: Connectivity verified");
-
-    setRemedyStage("verifying");
-    setRemedyAction("Verifying remediation...");
-    addLog("Verifying remediation through Azure Monitor...");
-    await delay(1000);
-    addLog("All checks passed: Resource is healthy");
+    setRemedyAction("Executing remediation plan...");
 
     try {
-      await apiService.createProblemTicket({
-        title: `Auto-remediation: ${selectedIssue?.title || "Issue"}`,
-        description: `Resolved via AI troubleshooting. Root cause: Resource contention. Resource: ${selectedIssue?.resource || "unknown"}`,
-        assigned_to: "System",
+      const res: any = await apiService.executeTroubleshootPlan({ plan_id: planId });
+      if (!res?.success || !res?.plan) {
+        throw new Error(res?.error || "Execution failed");
+      }
+      const plan = res.plan;
+      const results = plan.results || [];
+      results.forEach((r: any) => {
+        const step = planSteps.find((s: any) => s.step_id === r.step_id);
+        const label = step?.description || `Step ${r.step_id}`;
+        if (r.status === "completed") {
+          addLog(`  ${r.advisory ? "Advisory" : "Executed"}: ${label} — ${r.result || "Done"}`);
+        } else {
+          addLog(`  Failed: ${label} — ${r.result || "Error"}`);
+        }
+        setStepResults(prev => ({ ...prev, [r.step_id]: r }));
       });
-      addLog("ITSM ticket created for audit trail");
-    } catch { addLog("Could not create audit ticket (ITSM unavailable)"); }
 
-    setRemedyStage("completed");
-    setRemedyAction("");
-    addLog("Remediation completed successfully");
+      setRemedyStage("verifying");
+      setRemedyAction("Verifying remediation results...");
+      addLog("Verifying remediation through Azure Monitor...");
 
-    addNotification({ title: "Issue resolved", message: `AI troubleshooting completed for "${selectedIssue?.title}"`, status: "success", category: "tenant_sync" });
+      try {
+        await apiService.createProblemTicket({
+          title: `Auto-remediation: ${selectedIssue?.title || "Issue"}`,
+          description: `Resolved via AI troubleshooting. Plan: ${planId}. Resource: ${selectedIssue?.resource || "unknown"}`,
+          assigned_to: "System",
+        });
+        addLog("ITSM ticket created for audit trail");
+      } catch { addLog("Could not create audit ticket (ITSM unavailable)"); }
 
-    try {
-      setSyncing(true);
-      await resync();
-      await fetchTickets();
-    } catch { }
-    setSyncing(false);
+      const allOk = results.every((r: any) => r.status === "completed");
+      setRemedyStage(allOk ? "completed" : "completed");
+      setRemedyAction(allOk ? "All remediation steps completed" : "Some steps completed with issues");
+      addLog(allOk ? "Remediation completed successfully" : "Remediation completed with some errors");
+
+      addNotification({
+        title: allOk ? "Issue resolved" : "Partial remediation",
+        message: `Troubleshooting completed for "${selectedIssue?.title}"`,
+        status: allOk ? "success" : "warning",
+        category: "tenant_sync",
+      });
+
+      try {
+        setSyncing(true);
+        await resync();
+        await fetchTickets();
+      } catch { }
+      setSyncing(false);
+    } catch (e: any) {
+      addLog(`Execution failed: ${e.message || "Unknown error"}`);
+      setRemedyStage("failed");
+      setRemedyAction("Execution could not be completed");
+      addNotification({ title: "Remediation failed", message: `Could not execute plan for "${selectedIssue?.title}"`, status: "error", category: "tenant_sync" });
+    }
   };
 
   const cancelRemedy = () => {
@@ -290,10 +329,12 @@ export default function TroubleshootAgentPage() {
     setRemedyStage("idle");
     setRemedyLog([]);
     setRemedyAction("");
+    setPlanId(null);
+    setPlanSteps([]);
+    setStepResults({});
   };
 
   const addLog = (msg: string) => setRemedyLog((prev) => [...prev, msg]);
-  const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
   const formatTime = () => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
   const handleSort = (column: string) => {
@@ -369,7 +410,7 @@ export default function TroubleshootAgentPage() {
     <div className="min-h-screen bg-gray-50 dark:bg-slate-950 flex">
       <Sidebar />
       <div className="flex-1 lg:ml-[240px] transition-all">
-        <Header showLiveIndicator userName="Harsh Pardhi" />
+        <Header showLiveIndicator />
         <main className="p-4 lg:p-5">
           <div className="max-w-7xl mx-auto">
             {/* Header */}
@@ -381,6 +422,12 @@ export default function TroubleshootAgentPage() {
                     Diagnose and resolve Azure infrastructure issues from ServiceNow, Azure Monitor Alerts &amp; Azure Service Health.
                     <span className="ml-2 text-xs text-gray-400">Auto-refreshes every 5 minutes</span>
                   </p>
+                  <div className="flex items-center gap-2 mt-2">
+                    <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-800">Azure Monitor</span>
+                    <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800">Service Health</span>
+                    <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 border border-purple-200 dark:border-purple-800">Log Analytics</span>
+                    <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 border border-orange-200 dark:border-orange-800">ServiceNow</span>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <Button variant="outline" size="sm" onClick={handleResync} disabled={syncing} className="h-8 text-xs gap-1.5">
@@ -472,15 +519,15 @@ export default function TroubleshootAgentPage() {
                       </div>
                     ) : (
                       <div className="overflow-x-auto">
-                        <table className="w-full">
+                          <table className="w-full">
                           <thead>
                             <tr className="border-b border-gray-200 dark:border-slate-700">
-                              {["title", "resource", "severity", "status", "source", "time"].map((col) => (
-                                <th key={col} className="text-left py-3 px-4 text-xs font-semibold text-gray-500 dark:text-slate-400 cursor-pointer select-none hover:text-gray-700 dark:hover:text-slate-300"
-                                  onClick={() => handleSort(col)}>
-                                  {col.charAt(0).toUpperCase() + col.slice(1)} {sortConfig?.column === col && (sortConfig.direction === "asc" ? "\u2191" : "\u2193")}
-                                </th>
-                              ))}
+                              <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 dark:text-slate-400">Issue Title</th>
+                              <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 dark:text-slate-400">Severity</th>
+                              <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 dark:text-slate-400">Status</th>
+                              <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 dark:text-slate-400">Resource</th>
+                              <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 dark:text-slate-400">Created Date</th>
+                              <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 dark:text-slate-400">Resolved Date</th>
                               <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 dark:text-slate-400">Action</th>
                             </tr>
                           </thead>
@@ -488,19 +535,15 @@ export default function TroubleshootAgentPage() {
                             {filteredAndSortedIssues.map((issue) => (
                               <tr key={issue.id} className="border-b border-gray-100 dark:border-slate-800 hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors">
                                 <td className="py-3 px-4 text-sm text-gray-900 dark:text-white max-w-[200px] truncate">{issue.title}</td>
-                                <td className="py-3 px-4 text-sm text-gray-600 dark:text-slate-300 max-w-[140px] truncate">{issue.resource}</td>
                                 <td className="py-3 px-4">
                                   <span className={cn("text-xs px-2 py-0.5 rounded-full border font-medium", getSeverityColor(issue.severity))}>{issue.severity}</span>
                                 </td>
                                 <td className="py-3 px-4">
                                   <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium", getStatusColor(issue.status))}>{issue.status}</span>
                                 </td>
-                                <td className="py-3 px-4">
-                                  <span className="flex items-center gap-1 text-xs text-gray-500 dark:text-slate-400">
-                                    {getSourceIcon(issue.source)} {issue.source}
-                                  </span>
-                                </td>
-                                <td className="py-3 px-4 text-xs text-gray-500 dark:text-slate-400">{issue.time}</td>
+                                <td className="py-3 px-4 text-sm text-gray-600 dark:text-slate-300 max-w-[120px] truncate">{issue.resource}</td>
+                                <td className="py-3 px-4 text-xs text-gray-500 dark:text-slate-400">{issue.created_date ? new Date(issue.created_date).toLocaleDateString() : "—"}</td>
+                                <td className="py-3 px-4 text-xs text-gray-500 dark:text-slate-400">{issue.resolved_date ? new Date(issue.resolved_date).toLocaleDateString() : "—"}</td>
                                 <td className="py-3 px-4">
                                   <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => startRemedy(issue)} disabled={remedyStage !== "idle"}>
                                     <Zap className="h-3 w-3 mr-1" />
@@ -525,20 +568,24 @@ export default function TroubleshootAgentPage() {
                     <CardTitle className="text-sm font-semibold text-gray-900 dark:text-white">Issue Summary</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs text-gray-500 dark:text-slate-400">Critical</span>
-                        <span className="text-sm font-semibold text-red-600 dark:text-red-400">{issueSummary.critical}</span>
+                    {resolutionStats.open + resolutionStats.resolved + resolutionStats.escalated === 0 ? (
+                      <p className="text-xs text-gray-400 dark:text-slate-500 text-center py-4">No active issues</p>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-gray-500 dark:text-slate-400">Open Issues</span>
+                          <span className="text-sm font-semibold text-amber-600 dark:text-amber-400">{resolutionStats.open}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-gray-500 dark:text-slate-400">Resolved Issues</span>
+                          <span className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">{resolutionStats.resolved}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-gray-500 dark:text-slate-400">Escalated (&gt;15d)</span>
+                          <span className="text-sm font-semibold text-red-600 dark:text-red-400">{resolutionStats.escalated}</span>
+                        </div>
                       </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs text-gray-500 dark:text-slate-400">Warning</span>
-                        <span className="text-sm font-semibold text-amber-600 dark:text-amber-400">{issueSummary.warning}</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs text-gray-500 dark:text-slate-400">Info</span>
-                        <span className="text-sm font-semibold text-blue-600 dark:text-blue-400">{issueSummary.info}</span>
-                      </div>
-                    </div>
+                    )}
                   </CardContent>
                 </Card>
 
@@ -609,15 +656,12 @@ export default function TroubleshootAgentPage() {
                       <div className="px-6 pt-4 pb-2">
                         <div className="flex items-center gap-2 overflow-x-auto pb-2">
                           {[
-                            { key: "analyzing_logs", label: "Analyze Logs", icon: <FileText className="h-3.5 w-3.5" /> },
-                            { key: "analyzing_metrics", label: "Analyze Metrics", icon: <Activity className="h-3.5 w-3.5" /> },
-                            { key: "identifying_root_cause", label: "Root Cause", icon: <Search className="h-3.5 w-3.5" /> },
-                            { key: "generating_fix", label: "Generate Fix", icon: <Wrench className="h-3.5 w-3.5" /> },
-                            { key: "awaiting_approval", label: "Approval", icon: <CheckCircle className="h-3.5 w-3.5" /> },
+                            { key: "analyzing_logs", label: "Analyze", icon: <Search className="h-3.5 w-3.5" /> },
+                            { key: "awaiting_approval", label: "Plan Review", icon: <FileText className="h-3.5 w-3.5" /> },
                             { key: "executing", label: "Execute", icon: <Zap className="h-3.5 w-3.5" /> },
                             { key: "verifying", label: "Verify", icon: <Shield className="h-3.5 w-3.5" /> },
                           ].map((stage) => {
-                            const stageKeys = ["analyzing_logs", "analyzing_metrics", "identifying_root_cause", "generating_fix", "awaiting_approval", "executing", "verifying"];
+                            const stageKeys = ["analyzing_logs", "awaiting_approval", "executing", "verifying"];
                             const idx = stageKeys.indexOf(remedyStage);
                             const stageIdx = stageKeys.indexOf(stage.key);
                             const isComplete = stageIdx < idx;

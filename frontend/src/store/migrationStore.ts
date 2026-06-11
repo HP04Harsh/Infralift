@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { useNotificationStore } from './notificationStore';
 
 export type MigrationStatus = "planned" | "in-progress" | "completed" | "failed";
 
@@ -40,6 +41,16 @@ export const useMigrationStore = create<MigrationState>()(
         set((state) => ({
           migrations: [newMigration, ...state.migrations],
         }));
+        if (migration.status === "completed") {
+          useNotificationStore.getState().addNotification({
+            title: `Migration completed: ${migration.name}`,
+            message: `${migration.resourcesMigrated} of ${migration.totalResources} resources migrated`,
+            status: "success",
+            category: "activity",
+            source: "migration",
+            severity: "info",
+          });
+        }
       },
 
       setMigrations: (migrations) => {
@@ -47,18 +58,35 @@ export const useMigrationStore = create<MigrationState>()(
       },
 
       updateStatus: (id, status, progress, resourcesMigrated) => {
-        set((state) => ({
-          migrations: state.migrations.map((m) =>
-            m.id === id
-              ? {
-                  ...m,
-                  status,
-                  ...(progress !== undefined ? { progress } : {}),
-                  ...(resourcesMigrated !== undefined ? { resourcesMigrated } : {}),
-                }
-              : m
-          ),
-        }));
+        let name = "";
+        let migrated = 0;
+        let total = 0;
+        set((state) => {
+          const m = state.migrations.find((m) => m.id === id);
+          if (m) { name = m.name; migrated = m.resourcesMigrated; total = m.totalResources; }
+          return {
+            migrations: state.migrations.map((m) =>
+              m.id === id
+                ? {
+                    ...m,
+                    status,
+                    ...(progress !== undefined ? { progress } : {}),
+                    ...(resourcesMigrated !== undefined ? { resourcesMigrated } : {}),
+                  }
+                : m
+            ),
+          };
+        });
+        if (name && status === "completed") {
+          useNotificationStore.getState().addNotification({
+            title: `Migration completed: ${name}`,
+            message: `${resourcesMigrated ?? migrated} of ${total} resources migrated successfully`,
+            status: "success",
+            category: "activity",
+            source: "migration",
+            severity: "info",
+          });
+        }
       },
 
       totalCompleted: () => get().migrations.filter((m) => m.status === "completed").length,

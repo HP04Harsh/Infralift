@@ -2,18 +2,13 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-# Install dependencies
 COPY package.json* ./
 RUN npm install
 
-# Copy application code
 COPY . .
 
-# Expose port
-EXPOSE 3000
-
-# Build for production
 RUN npm run build
 
-# Start production server
+EXPOSE 3000
+
 CMD ["npm", "run", "start"]

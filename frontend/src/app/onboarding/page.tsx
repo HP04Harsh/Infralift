@@ -74,9 +74,8 @@ export default function OnboardingPage() {
     if (currentStep !== 3) {
       setShowConnectionAnimation(false);
       setAnimationCompleted(false);
-    } else if (resourceSync.status === "syncing") {
-      // Stale syncing state from previous attempt — reset to idle
-      updateResourceSync({ status: "idle" });
+    } else if (resourceSync.status === "syncing" || resourceSync.status === "idle") {
+      // Only reset stale "syncing" state, leave completed/failed alone
     }
   }, [currentStep, resourceSync.status, updateResourceSync]);
 
@@ -94,17 +93,22 @@ export default function OnboardingPage() {
 
   const handleVerify = async (cardId: string) => {
     setVerifyingCard(cardId);
-    
-    // Simulate API verification
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    // Always succeed for demo - in production, call backend API
-    verifyCard(cardId);
-    toast({
-      title: "Verification successful",
-      description: "Assignment has been verified",
-    });
-    
+    try {
+      const res = await apiService.verifyAssignment({
+        step_id: `step-${currentStep}`,
+        card_id: cardId,
+        command: servicePrincipalCards.find(c => c.id === cardId)?.command || "",
+        user_id: localStorage.getItem('user_id') || "default",
+      });
+      if ((res as any)?.success) {
+        verifyCard(cardId);
+        toast({ title: "Verification successful", description: "Assignment has been verified." });
+      } else {
+        toast({ title: "Verification failed", description: (res as any)?.message || "Could not verify. Ensure you ran the command." });
+      }
+    } catch {
+      toast({ title: "Verification failed", description: "Backend unreachable. Please ensure the backend is running." });
+    }
     setVerifyingCard(null);
   };
 
@@ -134,16 +138,26 @@ export default function OnboardingPage() {
     setTenantId(tenantId);
     setSubscriptionId(subscriptionId);
 
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
+    try {
+      const res = await apiService.connectTenant({
+        client_id: localStorage.getItem('client_id') || "",
+        client_secret: localStorage.getItem('client_secret') || "",
+        tenant_id: tenantId,
+        subscription_id: subscriptionId,
+        environment_name: "production",
+        user_id: localStorage.getItem('user_id') || "default",
+      });
+      if ((res as any)?.success) {
+        completeStep(2);
+        setCurrentStep(3);
+        toast({ title: "Tenant connected", description: "Successfully connected to your Azure tenant." });
+      } else {
+        toast({ title: "Connection failed", description: (res as any)?.message || "Could not connect tenant." });
+      }
+    } catch {
+      toast({ title: "Connection failed", description: "Backend unreachable. Check backend connection." });
+    }
     setIsConnecting(false);
-    completeStep(2);
-    setCurrentStep(3);
-    toast({
-      title: "Tenant connected",
-      description: "Successfully connected to your Azure tenant",
-    });
   };
 
   const handleSyncResources = async () => {
@@ -182,7 +196,7 @@ export default function OnboardingPage() {
         const syncStatus = (status as any)?.status;
         if (syncStatus === "completed" || syncStatus === "COMPLETED") {
           syncedCount = (status as any)?.synced_resources ?? 0;
-          updateResourceSync({ status: "completed", lastSync: new Date().toISOString() } as any);
+          updateResourceSync({ status: "completed", lastSync: new Date().toISOString(), syncedCount });
           await tenantFetchAll();
           toast({
             title: "Sync completed",
@@ -383,7 +397,7 @@ export default function OnboardingPage() {
                 </p>
                 <div className="grid grid-cols-2 gap-3 mb-6 max-w-sm mx-auto">
                   <div className="bg-gray-50 dark:bg-slate-900 rounded-lg p-4 border border-gray-100 dark:border-slate-800">
-                    <div className="text-2xl font-bold text-azure-500">{resourceSync.status === 'completed' ? (resourceSync as any).syncedCount ?? 0 : 0}</div>
+                    <div className="text-2xl font-bold text-azure-500">{resourceSync.status === 'completed' ? (resourceSync.syncedCount ?? 0) : 0}</div>
                     <div className="text-xs text-gray-500 dark:text-slate-400 mt-1">Resources Synced</div>
                   </div>
                   <div className="bg-gray-50 dark:bg-slate-900 rounded-lg p-4 border border-gray-100 dark:border-slate-800">
@@ -419,7 +433,7 @@ export default function OnboardingPage() {
       <Sidebar />
       
       <div className="flex-1 lg:ml-[240px] transition-all">
-        <Header userName="Harsh Pardhi" />
+        <Header />
         
         <main className="flex flex-col lg:flex-row min-h-[calc(100vh-3.5rem)]">
           <div className="flex-1 p-4 lg:p-5 max-w-[calc(100%-280px)]">

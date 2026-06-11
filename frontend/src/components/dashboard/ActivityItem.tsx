@@ -8,9 +8,10 @@ interface ActivityItemProps {
   title: string;
   status: "Completed" | "Resolved" | "Updated" | "Open" | "In Progress";
   timestamp: string;
+  onClick?: () => void;
 }
 
-export function ActivityItem({ title, status, timestamp }: ActivityItemProps) {
+export function ActivityItem({ title, status, timestamp, onClick }: ActivityItemProps) {
   const getStatusConfig = () => {
     switch (status) {
       case "Completed":
@@ -65,7 +66,11 @@ export function ActivityItem({ title, status, timestamp }: ActivityItemProps) {
       initial={{ opacity: 0, x: -10 }}
       animate={{ opacity: 1, x: 0 }}
       transition={{ duration: 0.3 }}
-      className="flex items-start gap-3 p-3 rounded-lg border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-gray-300 dark:hover:border-slate-600 transition-all"
+      onClick={onClick}
+      className={cn(
+        "flex items-start gap-3 p-3 rounded-lg border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 transition-all",
+        onClick ? "cursor-pointer hover:border-gray-300 dark:hover:border-slate-600" : "hover:border-gray-200 dark:hover:border-slate-700"
+      )}
     >
       <div className={cn(
         "p-1.5 rounded-full flex-shrink-0",

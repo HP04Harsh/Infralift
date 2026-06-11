@@ -40,8 +40,10 @@ class VerificationResponse(BaseModel):
 class TenantConnection(BaseModel):
     tenant_id: str
     subscription_id: str
-    display_name: str
-    state: str
+    display_name: str = ""
+    state: str = ""
+    environment_name: str = ""
+    validated: bool = False
     providers: Optional[Dict[str, Any]] = None
 
 

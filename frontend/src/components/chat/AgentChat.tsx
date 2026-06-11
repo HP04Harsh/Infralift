@@ -31,16 +31,11 @@ export function AgentChat({ agentName, agentType, initialPrompt = "" }: AgentCha
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [providerStatus, setProviderStatus] = useState<'idle' | 'connected' | 'unavailable'>('idle');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const effectRan = useRef(false);
   const isSubmitting = useRef(false);
-  const agentSettings = useSettingsStore((s) => s.agents[agentType as keyof typeof s.agents]);
-
-  const hasAzureOpenAI = Boolean(
-    agentSettings?.azureEndpoint &&
-    agentSettings?.openaiApiKey &&
-    agentSettings?.model
-  );
+  const [hasAnyProvider, setHasAnyProvider] = useState(true);
 
   useEffect(() => {
     const savedMessages = localStorage.getItem(`chat_${agentType}`);
@@ -90,40 +85,34 @@ export function AgentChat({ agentName, agentType, initialPrompt = "" }: AgentCha
 
     try {
       let responseText = "";
-      let events: any[] = [];
 
-      if (hasAzureOpenAI) {
-        events = [
-          { type: "activity", icon: "MessageSquare", title: "Sending to Azure OpenAI...", status: "in_progress" },
-        ];
+      const agentSettings = useSettingsStore.getState().agents[agentType as keyof ReturnType<typeof useSettingsStore.getState>['agents']];
+      const hasAzureCreds = agentSettings && Boolean((agentSettings as any).azureEndpoint && (agentSettings as any).openaiApiKey);
 
-        const res: any = await apiService.aiChat({
-          message: content,
-          agent_type: agentType,
-          conversation_context: {
-            history: messages.slice(-10).map(m => ({
-              role: m.role,
-              content: m.content,
-            })),
-          },
-          azure_endpoint: agentSettings.azureEndpoint,
-          azure_key: agentSettings.openaiApiKey,
-          azure_deployment: agentSettings.model,
-          azure_api_version: "2024-02-15-preview",
-        });
+      const res: any = await apiService.aiChat({
+        message: content,
+        agent_type: agentType,
+        conversation_context: {
+          history: messages.slice(-10).map(m => ({
+            role: m.role,
+            content: m.content,
+          })),
+        },
+        ...(hasAzureCreds ? {
+          azure_endpoint: (agentSettings as any).azureEndpoint,
+          azure_key: (agentSettings as any).openaiApiKey,
+          azure_deployment: (agentSettings as any).model,
+          azure_api_version: (agentSettings as any).apiVersion || "2024-02-15-preview",
+        } : {}),
+      });
 
-        events = res?.events || [];
-        responseText = res?.full_response || "";
+      responseText = res?.full_response || "";
 
-        if (!responseText) {
-          responseText = "I processed your request. How can I help further?";
-        }
+      if (responseText) {
+        setProviderStatus('connected');
       } else {
-        responseText = "Azure OpenAI is not configured. Go to **Settings > Agents** to configure your AI provider credentials.";
-        events = [
-          { type: "activity", icon: "AlertTriangle", title: "AI Not Configured", status: "error" },
-          { type: "result", icon: "Settings", title: "Configure in Settings", status: "completed" },
-        ];
+        setProviderStatus('unavailable');
+        responseText = "No AI provider is currently configured.\n\nConfigure Azure OpenAI or HuggingFace from **Settings → Agent Settings** to enable AI features.";
       }
 
       const assistantMessage: Message = {
@@ -131,24 +120,26 @@ export function AgentChat({ agentName, agentType, initialPrompt = "" }: AgentCha
         role: "assistant",
         content: responseText,
         timestamp: new Date(),
-        events,
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
     } catch (error: any) {
+      const errorMsg = error?.message || "";
+      const isProviderError = errorMsg.toLowerCase().includes("provider") || errorMsg.toLowerCase().includes("not configured");
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
-        content: `**Error:** ${error?.message || "Request failed. Check your Azure OpenAI configuration in Settings > Agents."}`,
+        content: isProviderError
+          ? "No AI provider is currently configured.\n\nConfigure Azure OpenAI or HuggingFace from **Settings → Agent Settings** to enable AI features."
+          : `**Error:** ${errorMsg}`,
         timestamp: new Date(),
-        events: [{ type: "activity", icon: "AlertTriangle", title: "Error", status: "error" }],
       };
       setMessages((prev) => [...prev, errorMessage]);
     } finally {
       setIsLoading(false);
       isSubmitting.current = false;
     }
-  }, [agentType, agentSettings, hasAzureOpenAI, isLoading, messages]);
+  }, [agentType, isLoading, messages]);
 
   const placeholderTexts = [
     `Ask ${agentName} anything...`,
@@ -161,7 +152,7 @@ export function AgentChat({ agentName, agentType, initialPrompt = "" }: AgentCha
       <Sidebar />
 
       <div className="flex-1 lg:ml-[240px] transition-all">
-        <Header showLiveIndicator userName="Harsh Pardhi" />
+        <Header showLiveIndicator />
 
         <main className="h-[calc(100vh-56px)] flex flex-col">
           <div className="bg-white dark:bg-slate-900 border-b border-gray-200 dark:border-slate-800 px-4 lg:px-6 py-4">
@@ -184,16 +175,18 @@ export function AgentChat({ agentName, agentType, initialPrompt = "" }: AgentCha
                   </h1>
                   <p className="text-sm text-gray-500 dark:text-slate-400 flex items-center gap-2">
                     {agentType} Agent
-                    {hasAzureOpenAI ? (
+                    {providerStatus === 'connected' ? (
                       <span className="inline-flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
                         <CheckCircle className="h-3 w-3" />
-                        Azure OpenAI
+                        AI Connected
                       </span>
-                    ) : (
+                    ) : providerStatus === 'unavailable' ? (
                       <span className="inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
                         <AlertTriangle className="h-3 w-3" />
                         Not Configured
                       </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-xs text-gray-400">Checking...</span>
                     )}
                   </p>
                 </div>
@@ -203,16 +196,13 @@ export function AgentChat({ agentName, agentType, initialPrompt = "" }: AgentCha
 
           <div className="flex-1 overflow-y-auto px-4 lg:px-6 py-6">
             <div className="max-w-4xl mx-auto space-y-4">
-              {!hasAzureOpenAI && messages.length === 0 && !isLoading && (
+              {messages.length === 0 && !isLoading && (
                 <div className="text-center py-12">
-                  <AlertTriangle className="h-12 w-12 text-amber-400 mx-auto mb-4" />
-                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Azure OpenAI Not Configured</h2>
-                  <p className="text-sm text-gray-500 dark:text-slate-400 max-w-md mx-auto mb-4">
-                    Configure your Azure OpenAI endpoint, API key, and deployment in Settings to enable AI-powered responses.
+                  <Bot className="h-12 w-12 text-azure-400 mx-auto mb-4" />
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">{agentName}</h2>
+                  <p className="text-sm text-gray-500 dark:text-slate-400 max-w-md mx-auto">
+                    Ask about migration scenarios, get help planning your Azure migration, or start a guided migration workflow.
                   </p>
-                  <Button onClick={() => router.push('/settings')} variant="default" className="bg-azure-600 hover:bg-azure-700">
-                    Go to Settings
-                  </Button>
                 </div>
               )}
               <AnimatePresence>
@@ -231,9 +221,6 @@ export function AgentChat({ agentName, agentType, initialPrompt = "" }: AgentCha
                         </div>
                       )}
                       <div className="max-w-[80%] space-y-2">
-                        {message.role === "assistant" && message.events && message.events.length > 0 && (
-                          <AIActivityTimeline events={message.events} />
-                        )}
                         <div
                           className={`rounded-2xl px-4 py-3 ${
                             message.role === "user"
@@ -275,7 +262,7 @@ export function AgentChat({ agentName, agentType, initialPrompt = "" }: AgentCha
                     <div className="space-y-2">
                       <AIActivityTimeline
                         events={[
-                          { type: "activity", icon: "MessageSquare", title: "Processing with Azure OpenAI...", status: "in_progress" },
+                          { type: "activity", icon: "MessageSquare", title: "Processing your request...", status: "in_progress" },
                         ]}
                         isStreaming={true}
                       />
@@ -301,7 +288,7 @@ export function AgentChat({ agentName, agentType, initialPrompt = "" }: AgentCha
                 onChange={(v) => setInputValue(v)}
                 onSubmit={() => handleSend(inputValue)}
                 placeholderTexts={placeholderTexts}
-                disabled={isLoading || !hasAzureOpenAI}
+                disabled={isLoading}
               />
             </div>
           </div>

@@ -10,8 +10,19 @@ interface DashboardHeroProps {
   userName?: string;
 }
 
-export function DashboardHero({ userName = "Harsh Pardhi" }: DashboardHeroProps) {
+export function DashboardHero({ userName: propUserName = "User" }: DashboardHeroProps) {
+  const [userName, setUserName] = useState(propUserName);
   const [greeting, setGreeting] = useState("");
+
+  useEffect(() => {
+    const update = () => {
+      const stored = localStorage.getItem('user_name');
+      if (stored) setUserName(stored);
+    };
+    update();
+    window.addEventListener('storage', update);
+    return () => window.removeEventListener('storage', update);
+  }, []);
 
   // Dynamic IST-based greeting
   useEffect(() => {

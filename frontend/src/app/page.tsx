@@ -9,6 +9,11 @@ export default function Home() {
 
   useEffect(() => {
     const redirect = () => {
+      const authToken = localStorage.getItem("auth_token");
+      if (!authToken) {
+        router.replace("/landing");
+        return;
+      }
       try {
         const stored = localStorage.getItem("infralift-onboarding-storage");
         if (stored) {
@@ -28,5 +33,5 @@ export default function Home() {
     redirect();
   }, [router]);
 
-  return <PortalLoader messages={["Initializing Infralift...", "Checking session...", "Preparing your workspace..."]} />;
+  return <PortalLoader messages={["Initializing...", "Checking session...", "Preparing your workspace..."]} />;
 }

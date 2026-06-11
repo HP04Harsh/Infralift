@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useTenantDataStore } from "@/store/tenantDataStore";
 import { useNotificationStore } from "@/store/notificationStore";
+import { useAssessmentStore } from "@/store/assessmentStore";
 import html2canvas from "html2canvas";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -228,7 +229,7 @@ function computeTableRows(resources: any[], metrics: any): TableRow[] {
 
 function CpuTrendChart({ data }: { data: { name: string; value: number }[] }) {
   if (data.length === 0) {
-    return <div className="flex items-center justify-center h-[150px] text-xs text-gray-400 dark:text-slate-500">No CPU Metrics Available</div>;
+    return <div className="flex items-center justify-center h-[150px] text-xs text-gray-400 dark:text-slate-500">No Telemetry Available</div>;
   }
   return (
     <ResponsiveContainer width="100%" height={150}>
@@ -245,7 +246,7 @@ function CpuTrendChart({ data }: { data: { name: string; value: number }[] }) {
 
 function DonutChart({ data }: { data: { label: string; value: number; color: string }[] }) {
   if (data.length === 0) {
-    return <div className="flex items-center justify-center h-[150px] text-xs text-gray-400 dark:text-slate-500">No data</div>;
+    return <div className="flex items-center justify-center h-[150px] text-xs text-gray-400 dark:text-slate-500">No Telemetry Available</div>;
   }
   return (
     <div className="flex items-center gap-4 h-full">
@@ -274,7 +275,7 @@ function DonutChart({ data }: { data: { label: string; value: number; color: str
 
 function MemByVmChart({ data }: { data: { label: string; value: number; color: string }[] }) {
   if (data.length === 0) {
-    return <div className="flex items-center justify-center h-[150px] text-xs text-gray-400 dark:text-slate-500">No Memory Metrics Available</div>;
+    return <div className="flex items-center justify-center h-[150px] text-xs text-gray-400 dark:text-slate-500">No Telemetry Available</div>;
   }
   return (
     <ResponsiveContainer width="100%" height={150}>
@@ -290,7 +291,7 @@ function MemByVmChart({ data }: { data: { label: string; value: number; color: s
 
 function NetworkChart({ data }: { data: { name: string; In: number; Out: number }[] }) {
   if (data.length === 0) {
-    return <div className="flex items-center justify-center h-[150px] text-xs text-gray-400 dark:text-slate-500">No Network Metrics Available</div>;
+    return <div className="flex items-center justify-center h-[150px] text-xs text-gray-400 dark:text-slate-500">No Telemetry Available</div>;
   }
   return (
     <ResponsiveContainer width="100%" height={150}>
@@ -308,7 +309,7 @@ function NetworkChart({ data }: { data: { name: string; In: number; Out: number 
 
 function StorageTierChart({ data }: { data: { label: string; used: number; total: number; color: string }[] }) {
   if (data.length === 0) {
-    return <div className="flex items-center justify-center h-[150px] text-xs text-gray-400 dark:text-slate-500">No Storage Tier Data</div>;
+    return <div className="flex items-center justify-center h-[150px] text-xs text-gray-400 dark:text-slate-500">No Telemetry Available</div>;
   }
   const chartData = data.map(d => ({
     name: d.label,
@@ -334,7 +335,7 @@ function StorageTierChart({ data }: { data: { label: string; used: number; total
 
 function AlertSeverityChart({ data }: { data: { label: string; value: number; color: string }[] }) {
   if (data.length === 0) {
-    return <div className="flex items-center justify-center h-[150px] text-xs text-gray-400 dark:text-slate-500">No Alerts</div>;
+    return <div className="flex items-center justify-center h-[150px] text-xs text-gray-400 dark:text-slate-500">No Telemetry Available</div>;
   }
   return (
     <ResponsiveContainer width="100%" height={150}>
@@ -605,10 +606,17 @@ function DataTable({ rows }: { rows: TableRow[] }) {
 export default function ObservabilityDashboardPage() {
   const { stats, costs, security, metrics, advisor, resources, loading, syncing, error, fetchAll, resync } = useTenantDataStore();
   const addNotification = useNotificationStore((s) => s.addNotification);
+  const assessments = useAssessmentStore((s) => s.assessments);
 
   useEffect(() => {
     if (loading) fetchAll();
   }, []);
+
+  const [selectedAssessmentId, setSelectedAssessmentId] = useState("all");
+  const selectedAssessment = useMemo(
+    () => selectedAssessmentId === "all" ? null : assessments.find((a) => a.id === selectedAssessmentId) ?? null,
+    [selectedAssessmentId, assessments]
+  );
 
   /* ── Overview KPIs ── */
   const overviewKpis = useMemo((): OverviewKpi[] => {
@@ -756,23 +764,38 @@ export default function ObservabilityDashboardPage() {
     <div className="min-h-screen bg-gray-50 dark:bg-slate-950 flex">
       <Sidebar />
       <div className="flex-1 lg:ml-[240px] transition-all">
-        <Header showLiveIndicator userName="Harsh Pardhi" />
+        <Header showLiveIndicator />
 
         <main className="p-4 lg:p-5">
           <div ref={dashboardRef} className="max-w-7xl mx-auto">
             {/* ── Header ── */}
-            <div className="flex items-start justify-between mb-5">
+            <div className="flex items-start justify-between mb-3">
               <div>
                 <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-1">Observability Agent</h1>
                 <p className="text-sm text-gray-500 dark:text-slate-400">
-                  Real-time monitoring and analytics from Azure Monitor, Resource Graph, Advisor & Defender.
+                  Real-time monitoring and analytics from Azure Monitor, Log Analytics &amp; Resource Graph.
                   {stats?.synced_at && (
                     <span className="ml-2 text-xs text-gray-400">Last sync: {new Date(stats.synced_at).toLocaleString()}</span>
                   )}
                 </p>
                 {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
+                <div className="flex items-center gap-2 mt-2">
+                  <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-800">Azure Monitor</span>
+                  <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 border border-purple-200 dark:border-purple-800">Log Analytics</span>
+                  <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800">Resource Graph</span>
+                </div>
               </div>
               <div className="flex items-center gap-2">
+                <select
+                  value={selectedAssessmentId}
+                  onChange={(e) => setSelectedAssessmentId(e.target.value)}
+                  className="h-8 text-xs border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-300 px-3 focus:outline-none focus:ring-2 focus:ring-azure-500 max-w-[200px]"
+                >
+                  <option value="all">All Reports</option>
+                  {assessments.map((a) => (
+                    <option key={a.id} value={a.id}>{a.name} ({a.status})</option>
+                  ))}
+                </select>
                 <Button
                   variant="outline"
                   size="sm"
@@ -813,6 +836,18 @@ export default function ObservabilityDashboardPage() {
                 </div>
               </div>
             </div>
+
+            {selectedAssessment && (
+              <div className="mb-4 p-3 border border-azure-200 dark:border-azure-800 bg-azure-50 dark:bg-azure-900/20 rounded-lg flex items-center gap-3">
+                <BarChart3 className="h-5 w-5 text-azure-500 flex-shrink-0" />
+                <div className="text-sm">
+                  <span className="font-medium text-gray-900 dark:text-white">{selectedAssessment.name}</span>
+                  <span className="text-gray-500 dark:text-slate-400 ml-2">
+                    {selectedAssessment.type} &middot; {selectedAssessment.findings} findings &middot; {selectedAssessment.status} &middot; {new Date(selectedAssessment.dateTime).toLocaleDateString()}
+                  </span>
+                </div>
+              </div>
+            )}
 
             {/* ── Tenant Overview KPIs ── */}
             <div className="mb-5">

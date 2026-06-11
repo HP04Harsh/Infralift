@@ -39,7 +39,16 @@ export function AIActivityTimeline({ events, isStreaming }: AIActivityTimelinePr
   const activities = events.filter(e => e.type === "activity");
   const contentEvents = events.filter(e => e.type === "content");
 
-  if (activities.length === 0 && contentEvents.length === 0) return null;
+  // Deduplicate activities by title (prevents "Request Understood" showing twice)
+  const seen = new Set<string>();
+  const deduped = activities.filter(e => {
+    const key = e.title || "";
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  if (deduped.length === 0 && contentEvents.length === 0) return null;
 
   return (
     <div className="bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl p-4 mb-4">
@@ -58,8 +67,8 @@ export function AIActivityTimeline({ events, isStreaming }: AIActivityTimelinePr
 
       <div className="space-y-1">
         <AnimatePresence>
-          {activities.map((event, i) => {
-            const isLast = i === activities.length - 1;
+          {deduped.map((event, i) => {
+            const isLast = i === deduped.length - 1;
             const status = event.status || "in_progress";
             const isError = status === "error";
             const isCompleted = status === "completed";

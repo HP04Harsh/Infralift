@@ -35,6 +35,7 @@ export interface SecuritySettings {
 
 export interface AppearanceSettings {
   darkMode: boolean;
+  theme: 'light' | 'dark' | 'system';
   transparencyLevel: number;
   animationIntensity: 'low' | 'medium' | 'high';
   compactSidebar: boolean;
@@ -44,6 +45,7 @@ export interface AgentSettings {
   openaiApiKey: string;
   azureEndpoint: string;
   model: string;
+  apiVersion: string;
   temperature: number;
   maxTokens: number;
   automationEnabled: boolean;
@@ -57,6 +59,14 @@ export interface InfrastructureStorageSettings {
   containerName: string;
   accessKey: string;
   validated: boolean;
+  validationError: string | null;
+  // Azure Files
+  shareName: string;
+  // Azure Data Lake
+  fileSystem: string;
+  tenantId: string;
+  clientId: string;
+  clientSecret: string;
 }
 
 export interface SettingsState {
@@ -122,6 +132,7 @@ const defaultSecuritySettings: SecuritySettings = {
 
 const defaultAppearanceSettings: AppearanceSettings = {
   darkMode: false,
+  theme: 'light',
   transparencyLevel: 50,
   animationIntensity: 'medium',
   compactSidebar: false,
@@ -133,12 +144,19 @@ const defaultInfrastructureStorage: InfrastructureStorageSettings = {
   containerName: 'terraform-artifacts',
   accessKey: '',
   validated: false,
+  validationError: null,
+  shareName: '',
+  fileSystem: '',
+  tenantId: '',
+  clientId: '',
+  clientSecret: '',
 };
 
 const defaultAgentSettings: AgentSettings = {
   openaiApiKey: '',
   azureEndpoint: '',
   model: 'gpt-4',
+  apiVersion: '2024-02-15-preview',
   temperature: 0.7,
   maxTokens: 2000,
   automationEnabled: true,

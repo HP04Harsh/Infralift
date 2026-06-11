@@ -1,6 +1,6 @@
 "use client";
 
-import { Search, Settings, ChevronRight, Menu, X, BookOpen, Activity } from "lucide-react";
+import { Search, Settings, ChevronRight, Menu, X, BookOpen, Activity, Bell } from "lucide-react";
 import { useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { useOnboardingStore } from "@/store/onboardingStore";
@@ -70,28 +70,11 @@ export function Sidebar() {
             onClick={() => router.push('/dashboard')}
             className="flex items-center gap-2.5 mb-2 hover:opacity-80 transition-opacity cursor-pointer w-full text-left"
           >
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden">
-              {customization.logoUrl ? (
-                <img 
-                  src={customization.logoUrl} 
-                  alt={general.portalName} 
-                  className="w-full h-full object-contain"
-                  onError={(e) => {
-                    e.currentTarget.style.display = 'none';
-                    e.currentTarget.parentElement!.innerHTML = '<span class="text-azure-500 font-bold text-base">I</span>';
-                  }}
-                />
-              ) : (
-                <img 
-                  src="/images/infralift-logo.png" 
-                  alt={general.portalName} 
-                  className="w-full h-full object-contain"
-                  onError={(e) => {
-                    e.currentTarget.style.display = 'none';
-                    e.currentTarget.parentElement!.innerHTML = '<span class="text-azure-500 font-bold text-base">I</span>';
-                  }}
-                />
-              )}
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden bg-white">
+              <svg viewBox="0 0 32 32" className="w-full h-full" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect width="32" height="32" rx="6" fill="white"/>
+                <text x="16" y="22" textAnchor="middle" fontSize="18" fontWeight="bold" fill="#0078d4" fontFamily="system-ui">iL</text>
+              </svg>
             </div>
             <h1 className="text-lg font-bold text-white">{general.portalName}</h1>
           </button>
@@ -181,6 +164,18 @@ export function Sidebar() {
                 <span className="flex-1 text-left">Monitoring</span>
               </button>
             )}
+            <button
+              onClick={() => router.push("/notifications")}
+              className={cn(
+                "w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-xs transition-all group",
+                pathname === "/notifications"
+                  ? "bg-azure-600 text-white"
+                  : "text-gray-300 hover:bg-gray-800 hover:text-white"
+              )}
+            >
+              <Bell className="h-3.5 w-3.5 flex-shrink-0" />
+              <span className="flex-1 text-left">Notifications</span>
+            </button>
           </nav>
         </div>
 
@@ -204,9 +199,8 @@ export function Sidebar() {
         <div className="px-3 pb-4">
           <div className="text-center space-y-1">
             <p className="text-[10px] text-gray-500 font-medium">
-              2026 @ InfraLift LLP
+              2026 @ {general.organizationName || general.portalName + ' LLP'}
             </p>
-
           </div>
         </div>
       </aside>

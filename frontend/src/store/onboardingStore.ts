@@ -26,6 +26,7 @@ export interface OnboardingState {
     isSyncing: boolean;
     lastSync: string;
     status: 'idle' | 'syncing' | 'completed' | 'failed';
+    syncedCount?: number;
   };
   
   // Actions

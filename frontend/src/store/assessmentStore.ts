@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { useNotificationStore } from './notificationStore';
 
 export type AssessmentStatus = "completed" | "in-progress" | "failed";
 
@@ -40,6 +41,16 @@ export const useAssessmentStore = create<AssessmentState>()(
           assessments: [newAssessment, ...state.assessments],
           totalDuration: state.totalDuration + assessment.duration,
         }));
+        if (assessment.status === "completed") {
+          useNotificationStore.getState().addNotification({
+            title: `Assessment completed: ${assessment.name}`,
+            message: `Found ${assessment.findings} findings`,
+            status: "success",
+            category: "activity",
+            source: "assessment",
+            severity: "info",
+          });
+        }
       },
 
       setAssessments: (assessments) => {
@@ -48,11 +59,27 @@ export const useAssessmentStore = create<AssessmentState>()(
       },
 
       updateStatus: (id, status, findings) => {
-        set((state) => ({
-          assessments: state.assessments.map((a) =>
-            a.id === id ? { ...a, status, ...(findings !== undefined ? { findings } : {}) } : a
-          ),
-        }));
+        let name = "";
+        let findingsCount = 0;
+        set((state) => {
+          const a = state.assessments.find((a) => a.id === id);
+          if (a) { name = a.name; findingsCount = a.findings; }
+          return {
+            assessments: state.assessments.map((a) =>
+              a.id === id ? { ...a, status, ...(findings !== undefined ? { findings } : {}) } : a
+            ),
+          };
+        });
+        if (name && status === "completed") {
+          useNotificationStore.getState().addNotification({
+            title: `Assessment completed: ${name}`,
+            message: `Assessment finished with ${findings ?? findingsCount} findings`,
+            status: "success",
+            category: "activity",
+            source: "assessment",
+            severity: "info",
+          });
+        }
       },
 
       getTotalDurationFormatted: () => {

@@ -29,6 +29,12 @@ interface AdvisorData {
   count: number;
 }
 
+interface ComplianceData {
+  policy_states?: any[];
+  regulatory_standards?: any[];
+  summary?: Record<string, number>;
+}
+
 interface ResourceSummary {
   resource_groups: number;
   virtual_machines: number;
@@ -62,6 +68,7 @@ interface TenantDataState {
   security: SecurityData | null;
   metrics: MetricsData | null;
   advisor: AdvisorData | null;
+  compliance: ComplianceData | null;
   resources: any[];
 
   fetchAll: () => Promise<void>;
@@ -79,18 +86,20 @@ export const useTenantDataStore = create<TenantDataState>()((set, get) => ({
   security: null,
   metrics: null,
   advisor: null,
+  compliance: null,
   resources: [],
 
   fetchAll: async () => {
     set({ loading: true, error: null });
     try {
-      const [statsRes, costsRes, securityRes, metricsRes, advisorRes, resourcesRes] =
+      const [statsRes, costsRes, securityRes, metricsRes, advisorRes, complianceRes, resourcesRes] =
         await Promise.allSettled([
           apiService.getResourceStats(),
           apiService.getResourceCosts(),
           apiService.getSecurityFindings(),
           apiService.getResourceMetrics(),
           apiService.getAdvisorRecommendations(),
+          apiService.getComplianceData(),
           apiService.listResources({ limit: 500 }),
         ]);
 
@@ -99,6 +108,7 @@ export const useTenantDataStore = create<TenantDataState>()((set, get) => ({
       const security = securityRes.status === "fulfilled" ? (securityRes.value as any)?.security ?? null : null;
       const metrics = metricsRes.status === "fulfilled" ? (metricsRes.value as any)?.metrics ?? null : null;
       const advisor = advisorRes.status === "fulfilled" ? (advisorRes.value as any) ?? null : null;
+      const compliance = complianceRes.status === "fulfilled" ? (complianceRes.value as any)?.compliance ?? null : null;
       const resources = resourcesRes.status === "fulfilled" ? (resourcesRes.value as any) ?? [] : [];
 
       set({
@@ -107,6 +117,7 @@ export const useTenantDataStore = create<TenantDataState>()((set, get) => ({
         security,
         metrics,
         advisor,
+        compliance,
         resources,
         loading: false,
         lastSync: new Date().toISOString(),

@@ -32,10 +32,19 @@ class AzureDeploymentService:
             yield {"type": "error", "step": "import", "message": f"Azure SDK not available: {e}"}
             return
 
-        resource_client = ResourceManagementClient(credential, subscription_id)
-        compute_client = ComputeManagementClient(credential, subscription_id)
-        network_client = NetworkManagementClient(credential, subscription_id)
-        storage_client = StorageManagementClient(credential, subscription_id)
+        if credentials is None:
+            yield {"type": "error", "step": "auth", "message": "Azure credentials not configured. Configure them in Settings > Azure Connection."}
+            return
+
+        try:
+            resource_client = ResourceManagementClient(credentials, subscription_id)
+            compute_client = ComputeManagementClient(credentials, subscription_id)
+            network_client = NetworkManagementClient(credentials, subscription_id)
+            storage_client = StorageManagementClient(credentials, subscription_id)
+        except Exception as e:
+            logger.error(f"Failed to create Azure SDK clients: {e}")
+            yield {"type": "error", "step": "auth", "message": f"Azure SDK client creation failed: {e}"}
+            return
 
         resource_type = plan.get("resourceType", "").lower()
         rg_name = plan.get("resourceGroup", f"rg-{plan.get('resourceName', 'default').lower()}")
@@ -191,6 +200,101 @@ class AzureDeploymentService:
         except Exception as e:
             logger.error(f"Failed to resize VM {vm_name}: {e}")
             return False
+
+    async def verify_deployment(
+        self,
+        credentials: Any,
+        subscription_id: str,
+        resource_group: str,
+        resource_name: str,
+        resource_type: str,
+    ) -> Dict[str, Any]:
+        """Post-deployment verification — queries Azure to confirm resource exists and is healthy."""
+        result = {
+            "verified": False,
+            "provisioning_state": None,
+            "actual_properties": {},
+            "errors": [],
+        }
+        try:
+            rtype = resource_type.lower()
+            if rtype in ("virtualmachine", "vm"):
+                from azure.mgmt.compute import ComputeManagementClient
+                client = ComputeManagementClient(credentials, subscription_id)
+                vm = client.virtual_machines.get(resource_group, resource_name)
+                state = vm.provisioning_state
+                result["verified"] = state == "Succeeded"
+                result["provisioning_state"] = state
+                result["actual_properties"] = {
+                    "id": vm.id,
+                    "name": vm.name,
+                    "location": vm.location,
+                    "size": vm.hardware_profile.vm_size,
+                    "os_type": vm.storage_profile.os_disk.os_type,
+                    "provisioning_state": state,
+                }
+
+            elif rtype in ("storageaccount", "storage"):
+                from azure.mgmt.storage import StorageManagementClient
+                client = StorageManagementClient(credentials, subscription_id)
+                sa = client.storage_accounts.get_properties(resource_group, resource_name)
+                state = sa.provisioning_state
+                result["verified"] = state == "Succeeded"
+                result["provisioning_state"] = state
+                result["actual_properties"] = {
+                    "id": sa.id,
+                    "name": sa.name,
+                    "location": sa.location,
+                    "kind": sa.kind,
+                    "sku": sa.sku.name if sa.sku else None,
+                    "provisioning_state": state,
+                }
+
+            elif rtype in ("resourcegroup", "resource group"):
+                from azure.mgmt.resource import ResourceManagementClient
+                client = ResourceManagementClient(credentials, subscription_id)
+                rg = client.resource_groups.get(resource_group)
+                state = rg.properties.provisioning_state if rg.properties else "Succeeded"
+                result["verified"] = state == "Succeeded"
+                result["provisioning_state"] = state
+                result["actual_properties"] = {
+                    "id": rg.id,
+                    "name": rg.name,
+                    "location": rg.location,
+                    "provisioning_state": state,
+                }
+
+            else:
+                # Generic ARM resource lookup
+                from azure.mgmt.resource import ResourceManagementClient
+                client = ResourceManagementClient(credentials, subscription_id)
+                try:
+                    arm = client.resources.get_by_id(
+                        f"/subscriptions/{subscription_id}/resourceGroups/{resource_group}/providers/{resource_type}/{resource_name}",
+                        "2024-03-01",
+                    )
+                    result["verified"] = True
+                    result["provisioning_state"] = "Succeeded"
+                    result["actual_properties"] = {
+                        "id": arm.id,
+                        "name": arm.name,
+                        "location": arm.location,
+                        "type": arm.type,
+                    }
+                except Exception:
+                    result["verified"] = False
+                    result["provisioning_state"] = "NotFound"
+                    result["errors"].append(f"Resource {resource_name} not found in {resource_group}")
+
+        except Exception as e:
+            result["verified"] = False
+            result["errors"].append(str(e))
+
+        if not result["verified"]:
+            logger.warning("Deployment verification failed for %s/%s: state=%s errors=%s",
+                           resource_group, resource_name, result["provisioning_state"], result["errors"])
+
+        return result
 
 
 azure_deployment_service = AzureDeploymentService()

@@ -17,15 +17,20 @@ import { useRouter } from "next/navigation";
 import { useTenantDataStore } from "@/store/tenantDataStore";
 import { apiService } from "@/services/api";
 import { useNotificationStore } from "@/store/notificationStore";
+import { useSettingsStore } from "@/store/settingsStore";
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell
+} from "recharts";
 
 const CURRENCY_SYMBOLS: Record<string, string> = {
-  USD: "$", INR: "₹", EUR: "€", GBP: "£", AED: "د.إ",
+  USD: "$", INR: "₹", EUR: "€", GBP: "£", AED: "د.إ", JPY: "¥", CAD: "C$", AUD: "A$", BRL: "R$", SGD: "S$", HKD: "HK$", KRW: "₩", CHF: "Fr",
 };
 
 const BUDGET_STORAGE_KEY = "infralift_budget_amount";
 
 function formatCurrency(amount: number, currency: string): string {
-  const symbol = CURRENCY_SYMBOLS[currency] ?? "$";
+  if (!currency) return "Currency unavailable";
+  const symbol = CURRENCY_SYMBOLS[currency] ?? currency + " ";
   return `${symbol}${Math.round(amount).toLocaleString()}`;
 }
 
@@ -43,7 +48,6 @@ export default function OptimizationAgentPage() {
   const [budgetInputValue, setBudgetInputValue] = useState("");
   const [recStates, setRecStates] = useState<Record<number, "pending" | "validating" | "planning" | "awaiting_approval" | "executing" | "completed" | "failed">>({});
   const [showApprovalDialog, setShowApprovalDialog] = useState<number | null>(null);
-  const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
     if (loading) fetchAll();
@@ -57,8 +61,8 @@ export default function OptimizationAgentPage() {
     }
   }, []);
 
-  const currency = costs?.currency ?? "USD";
-  const currencySymbol = CURRENCY_SYMBOLS[currency] ?? "$";
+  const currency = costs?.currency || "";
+  const currencySymbol = currency ? (CURRENCY_SYMBOLS[currency] ?? currency + " ") : "";
 
   /* ── Real cost data ── */
   const mtd = costs?.month_to_date ?? 0;
@@ -92,90 +96,107 @@ export default function OptimizationAgentPage() {
     addNotification({ title: "Budget cleared", message: "Monthly budget has been removed", status: "info", category: "tenant_sync" });
   };
 
-  /* ── Potential savings from advisor ── */
+  /* ── Potential savings from real Advisor data ── */
   const potentialSavings = useMemo(() => {
-    if (advisorRecs.length === 0) return { total: 0, breakdown: [] };
     const costRecs = advisorRecs.filter((r: any) => (r.category || "").toLowerCase() === "cost");
-    const highImpact = costRecs.filter((r: any) => (r.impact || "").toLowerCase() === "high");
-    const estimatedSavings = costRecs.length > 0
-      ? Math.round(forecast * (highImpact.length / Math.max(costRecs.length, 1)) * 0.15)
-      : Math.round(forecast * 0.08);
-    return {
-      total: estimatedSavings,
-      breakdown: [
-        { label: "Reserved Instances", value: Math.round(estimatedSavings * 0.35) },
-        { label: "Rightsizing", value: Math.round(estimatedSavings * 0.30) },
-        { label: "Unused Resources", value: Math.round(estimatedSavings * 0.20) },
-        { label: "Other", value: Math.round(estimatedSavings * 0.15) },
-      ],
-    };
-  }, [advisorRecs, forecast]);
+    const actualSavings = costRecs
+      .map((r: any) => Number(r.potentialSavings ?? r.estimatedSavings ?? 0))
+      .filter((v: number) => v > 0);
+    if (actualSavings.length > 0) {
+      const total = Math.round(actualSavings.reduce((s: number, v: number) => s + v, 0));
+      const byCategory: Record<string, number> = {};
+      costRecs.forEach((r: any) => {
+        const sv = Number(r.potentialSavings ?? r.estimatedSavings ?? 0);
+        if (sv > 0) {
+          const label = r.subCategory || r.category || "Other";
+          byCategory[label] = (byCategory[label] || 0) + Math.round(sv);
+        }
+      });
+      const breakdown = Object.entries(byCategory).length > 0
+        ? Object.entries(byCategory).map(([label, value]) => ({ label, value }))
+        : [{ label: "Cost Recommendations", value: total }];
+      return { total, breakdown };
+    }
+    return { total: 0, breakdown: [] };
+  }, [advisorRecs]);
 
   /* ── Advisor-based recommendations ── */
   const recommendations = useMemo(() => {
     if (advisorRecs.length === 0) {
-      const ctx = { costs, resources: resources?.length };
-      if (mtd > 0) {
-        return [{
-          id: 0,
-          title: "No advisor recommendations available",
-          savings: formatCurrency(0, currency),
-          effort: "—",
-          impact: "—",
-          prompt: "No recommendations",
-          category: "info",
-        }];
-      }
       return [];
     }
     return advisorRecs.slice(0, 10).map((rec: any, i: number) => {
       const cat = (rec.category || "").toLowerCase();
-      const impact = (rec.impact || "Low").toLowerCase();
-      const estSavings = cat === "cost"
-        ? Math.round(forecast * (impact === "high" ? 0.08 : impact === "medium" ? 0.04 : 0.02))
-        : 0;
-      const effort = impact === "high" ? "Medium" : impact === "medium" ? "Low" : "Low";
+      const imp = rec.impact || "Low";
+      const actualSavings = Number(rec.potentialSavings ?? rec.estimatedSavings ?? 0);
+      const savingsDisplay = actualSavings > 0 ? formatMonthly(actualSavings, currency) : "N/A";
+      const effort = imp === "High" ? "Medium" : imp === "Medium" ? "Low" : "Low";
+      const title = rec.problem || rec.recommendation_type || `Advisor recommendation #${i + 1}`;
+      const resourceLabel = rec.resource || "";
+      const severity = imp === "High" ? "High" : imp === "Medium" ? "Medium" : "Low";
       return {
         id: i,
-        title: rec.problem || rec.recommendation_type || "Advisor recommendation",
-        savings: estSavings > 0 ? formatMonthly(estSavings, currency) : "N/A",
+        title,
+        savings: savingsDisplay,
         effort,
-        impact: rec.impact || "Low",
-        prompt: `Implement advisor recommendation: ${rec.problem || rec.id}. Solution: ${rec.solution || ""}`,
+        impact: imp,
+        prompt: `Implement advisor recommendation: ${title}. Solution: ${rec.solution || ""}`,
         solution: rec.solution || "",
         category: cat,
+        resource: resourceLabel,
+        severity,
+        impactCategory: rec.category || "",
       };
     });
-  }, [advisorRecs, costs, currency, mtd, forecast, resources]);
+  }, [advisorRecs, currency]);
 
-  /* ── Optimization categories from cost data ── */
+  /* ── Optimization categories with real savings from Advisor ── */
   const optimizationCategories = useMemo(() => {
-    const toSavings = (pct: number, base: number) => formatMonthly(Math.round(base * pct / 100), currency);
-    const vmCost = costByService["Virtual Machines"] || costByService["virtual_machines"] || totalSvcCost * 0.35;
-    const storageCost = costByService["Storage"] || costByService["storage_accounts"] || totalSvcCost * 0.18;
-    const dbCost = costByService["SQL Database"] || costByService["sql_databases"] || totalSvcCost * 0.15;
-    const netCost = costByService["Network"] || costByService["Networking"] || totalSvcCost * 0.10;
-    const otherCost = Math.max(totalSvcCost - vmCost - storageCost - dbCost - netCost, 0);
+    const costRecs = advisorRecs.filter((r: any) => (r.category || "").toLowerCase() === "cost");
+    const totalAdvisorSavings = costRecs
+      .map((r: any) => Number(r.potentialSavings ?? 0))
+      .reduce((s: number, v: number) => s + v, 0);
+
+    const vmSavings = costRecs
+      .filter((r: any) => (r.problem || "").toLowerCase().includes("vm") || (r.problem || "").toLowerCase().includes("virtual machine"))
+      .map((r: any) => Number(r.potentialSavings ?? 0))
+      .reduce((s: number, v: number) => s + v, 0);
+
+    const storageSavings = costRecs
+      .filter((r: any) => (r.problem || "").toLowerCase().includes("storage") || (r.problem || "").toLowerCase().includes("disk"))
+      .map((r: any) => Number(r.potentialSavings ?? 0))
+      .reduce((s: number, v: number) => s + v, 0);
+
+    const dbSavings = costRecs
+      .filter((r: any) => (r.problem || "").toLowerCase().includes("sql") || (r.problem || "").toLowerCase().includes("database"))
+      .map((r: any) => Number(r.potentialSavings ?? 0))
+      .reduce((s: number, v: number) => s + v, 0);
+
+    const formatOrNa = (val: number) => val > 0 ? formatMonthly(val, currency) : "N/A";
 
     return [
-      { title: "VM Rightsizing", description: "Optimize VM sizes based on usage", icon: <Server className="h-5 w-5 text-blue-600" />, iconBg: "bg-blue-100 dark:bg-blue-900/40", savings: toSavings(25, vmCost), prompt: "I want to optimize my virtual machine sizes based on actual usage patterns. Please analyze CPU, memory, and disk usage across all VMs, identify over-provisioned resources, recommend appropriate VM sizes for right-sizing, and provide estimated cost savings." },
-      { title: "Reserved Instances", description: "Save with reserved instances", icon: <Clock className="h-5 w-5 text-green-600" />, iconBg: "bg-green-100 dark:bg-green-900/40", savings: toSavings(40, vmCost), prompt: "I want to optimize costs using Azure Reserved Instances. Please analyze my workload patterns, identify resources that would benefit from reserved instances, recommend the best reservation terms (1-year, 3-year), and calculate potential savings compared to pay-as-you-go pricing." },
-      { title: "Storage Optimization", description: "Optimize storage tiers and cleanup", icon: <Database className="h-5 w-5 text-purple-600" />, iconBg: "bg-purple-100 dark:bg-purple-900/40", savings: toSavings(20, storageCost), prompt: "I want to optimize my Azure storage costs. Please analyze storage usage across all storage accounts, identify opportunities for tier optimization (hot, cool, archive), find unused or stale data that can be deleted or archived, and provide recommendations for cost reduction." },
-      { title: "Idle Resources", description: "Identify and remove idle resources", icon: <Zap className="h-5 w-5 text-amber-600" />, iconBg: "bg-amber-100 dark:bg-amber-900/40", savings: toSavings(30, otherCost), prompt: "I want to identify and remove idle or unused Azure resources. Please analyze all resources for inactivity, identify orphaned resources (disks, NICs, IPs with no parent), find resources with zero usage over the past 30 days, and provide a cleanup plan with estimated cost savings." },
-      { title: "Database Optimization", description: "Optimize database configurations", icon: <Layers className="h-5 w-5 text-cyan-600" />, iconBg: "bg-cyan-100 dark:bg-cyan-900/40", savings: toSavings(20, dbCost), prompt: "I want to optimize my Azure database costs and performance. Please analyze database configurations, identify over-provisioned compute and storage, recommend appropriate service tiers and performance levels, and provide optimization recommendations for both SQL and NoSQL databases." },
-      { title: "Spot Instances", description: "Use spot instances for workloads", icon: <Target className="h-5 w-5 text-indigo-600" />, iconBg: "bg-indigo-100 dark:bg-indigo-900/40", savings: toSavings(35, vmCost), prompt: "I want to leverage Azure Spot Instances for cost savings. Please identify workloads suitable for spot instances (batch processing, dev/test, fault-tolerant apps), recommend implementation strategies, and provide guidance on handling spot instance evictions and ensuring high availability." },
+      { title: "VM Rightsizing", description: "Optimize VM sizes based on usage", icon: <Server className="h-5 w-5 text-blue-600" />, iconBg: "bg-blue-100 dark:bg-blue-900/40", savings: formatOrNa(vmSavings), prompt: "I want to optimize my virtual machine sizes based on actual usage patterns. Please analyze CPU, memory, and disk usage across all VMs, identify over-provisioned resources, recommend appropriate VM sizes for right-sizing, and provide estimated cost savings." },
+      { title: "Reserved Instances", description: "Save with reserved instances", icon: <Clock className="h-5 w-5 text-green-600" />, iconBg: "bg-green-100 dark:bg-green-900/40", savings: formatOrNa(0), prompt: "I want to optimize costs using Azure Reserved Instances. Please analyze my workload patterns, identify resources that would benefit from reserved instances, recommend the best reservation terms (1-year, 3-year), and calculate potential savings compared to pay-as-you-go pricing." },
+      { title: "Storage Optimization", description: "Optimize storage tiers and cleanup", icon: <Database className="h-5 w-5 text-purple-600" />, iconBg: "bg-purple-100 dark:bg-purple-900/40", savings: formatOrNa(storageSavings), prompt: "I want to optimize my Azure storage costs. Please analyze storage usage across all storage accounts, identify opportunities for tier optimization (hot, cool, archive), find unused or stale data that can be deleted or archived, and provide recommendations for cost reduction." },
+      { title: "Idle Resources", description: "Identify and remove idle resources", icon: <Zap className="h-5 w-5 text-amber-600" />, iconBg: "bg-amber-100 dark:bg-amber-900/40", savings: formatOrNa(0), prompt: "I want to identify and remove idle or unused Azure resources. Please analyze all resources for inactivity, identify orphaned resources (disks, NICs, IPs with no parent), find resources with zero usage over the past 30 days, and provide a cleanup plan with estimated cost savings." },
+      { title: "Database Optimization", description: "Optimize database configurations", icon: <Layers className="h-5 w-5 text-cyan-600" />, iconBg: "bg-cyan-100 dark:bg-cyan-900/40", savings: formatOrNa(dbSavings), prompt: "I want to optimize my Azure database costs and performance. Please analyze database configurations, identify over-provisioned compute and storage, recommend appropriate service tiers and performance levels, and provide optimization recommendations for both SQL and NoSQL databases." },
+      { title: "Spot Instances", description: "Use spot instances for workloads", icon: <Target className="h-5 w-5 text-indigo-600" />, iconBg: "bg-indigo-100 dark:bg-indigo-900/40", savings: formatOrNa(0), prompt: "I want to leverage Azure Spot Instances for cost savings. Identify workloads suitable for spot instances (batch processing, dev/test, fault-tolerant apps), recommend implementation strategies, and provide guidance on handling spot instance evictions and ensuring high availability." },
     ];
-  }, [costByService, totalSvcCost, currency, forecast]);
+  }, [advisorRecs, currency]);
 
   /* ── Apply recommendation full flow ── */
   const handleApplyRec = useCallback(async (recId: number, prompt: string) => {
     setRecStates(prev => ({ ...prev, [recId]: "validating" }));
     try {
-      await new Promise(r => setTimeout(r, 800));
       setRecStates(prev => ({ ...prev, [recId]: "planning" }));
       const ctx = { costs, resources: resources?.length };
-      await apiService.analyzeWithAI(prompt, ctx as any);
-      await new Promise(r => setTimeout(r, 600));
+      const agentCfg = useSettingsStore.getState().agents.optimization;
+      await apiService.analyzeWithAI(prompt, ctx as any, undefined, {
+        azure_endpoint: agentCfg.azureEndpoint,
+        azure_key: agentCfg.openaiApiKey,
+        azure_deployment: agentCfg.model,
+        azure_api_version: agentCfg.apiVersion,
+      });
       setRecStates(prev => ({ ...prev, [recId]: "awaiting_approval" }));
       setShowApprovalDialog(recId);
     } catch {
@@ -185,15 +206,20 @@ export default function OptimizationAgentPage() {
   }, [costs, resources, addNotification]);
 
   const executeRecommendation = async (recId: number) => {
+    const rec = recommendations.find(r => r.id === recId);
     setShowApprovalDialog(null);
     setRecStates(prev => ({ ...prev, [recId]: "executing" }));
     try {
-      await new Promise(r => setTimeout(r, 1500));
+      const agentCfg = useSettingsStore.getState().agents.optimization;
+      await apiService.analyzeWithAI(`Execute: ${rec?.prompt || ""}`, { mode: "execute", recommendation_id: recId } as any, undefined, {
+        azure_endpoint: agentCfg.azureEndpoint,
+        azure_key: agentCfg.openaiApiKey,
+        azure_deployment: agentCfg.model,
+        azure_api_version: agentCfg.apiVersion,
+      });
       setRecStates(prev => ({ ...prev, [recId]: "completed" }));
       addNotification({ title: "Recommendation applied", message: "Tenant state updated successfully", status: "success", category: "tenant_sync" });
-      setSyncing(true);
       await resync();
-      setSyncing(false);
     } catch {
       setRecStates(prev => ({ ...prev, [recId]: "failed" }));
       addNotification({ title: "Execution failed", message: "Could not apply this recommendation", status: "error", category: "tenant_sync" });
@@ -239,14 +265,14 @@ export default function OptimizationAgentPage() {
     }
   };
 
-  const activeRecs = recommendations.filter(r => r.id > 0 || r.category !== "info");
+  const activeRecs = recommendations;
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-slate-950 flex">
       <Sidebar />
 
       <div className="flex-1 lg:ml-[240px] transition-all">
-        <Header showLiveIndicator userName="Harsh Pardhi" />
+        <Header showLiveIndicator />
 
         <main className="p-4 lg:p-5">
           <div className="max-w-7xl mx-auto">
@@ -259,7 +285,7 @@ export default function OptimizationAgentPage() {
                   </h1>
                   <p className="text-sm text-gray-500 dark:text-slate-400">
                     Optimize Azure infrastructure costs and performance using Azure Cost Management &amp; Advisor.
-                    {costs?.currency && <span className="ml-2 text-xs">Currency: {costs.currency} ({currencySymbol})</span>}
+                    <span className="ml-2 text-xs">Currency: {costs?.currency || "N/A"}{currency ? ` (${currencySymbol})` : ""}</span>
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -300,7 +326,7 @@ export default function OptimizationAgentPage() {
                       <div className="p-4 border border-gray-200 dark:border-slate-700 rounded-xl">
                         <p className="text-xs text-gray-500 dark:text-slate-400 mb-1">Potential Monthly Savings</p>
                         <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
-                          {potentialSavings.total > 0 ? formatMonthly(potentialSavings.total, currency) : `${currencySymbol}0`}
+                          {potentialSavings.total > 0 ? formatMonthly(potentialSavings.total, currency) : "N/A"}
                         </p>
                         <p className="text-[10px] text-gray-400 dark:text-slate-500 mt-0.5">
                           Based on {advisorCount} Advisor recommendation{advisorCount !== 1 ? "s" : ""}
@@ -350,8 +376,8 @@ export default function OptimizationAgentPage() {
                           </div>
                           <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-1">{category.title}</h3>
                           <p className="text-xs text-gray-500 dark:text-slate-400 mb-3">{category.description}</p>
-                          <div className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium text-sm">
-                            <TrendingDown className="h-3.5 w-3.5" />
+                          <div className={cn("flex items-center gap-1 font-medium text-sm", category.savings === "N/A" ? "text-gray-400 dark:text-slate-500" : "text-emerald-600 dark:text-emerald-400")}>
+                            <TrendingDown className={cn("h-3.5 w-3.5", category.savings === "N/A" ? "text-gray-400 dark:text-slate-500" : "")} />
                             {category.savings}
                           </div>
                         </motion.div>
@@ -389,7 +415,7 @@ export default function OptimizationAgentPage() {
                             key={rec.id}
                             initial={{ opacity: 0, x: -20 }}
                             animate={{ opacity: 1, x: 0 }}
-                            className="flex items-center gap-4 p-4 border border-gray-200 dark:border-slate-700 rounded-xl hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors"
+                            className="flex items-start gap-4 p-4 border border-gray-200 dark:border-slate-700 rounded-xl hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors"
                           >
                             <div className="flex-shrink-0">
                               <div className={cn(
@@ -408,6 +434,10 @@ export default function OptimizationAgentPage() {
                             </div>
                             <div className="flex-1 min-w-0">
                               <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-1">{rec.title}</h4>
+                              <div className="flex items-center gap-2 flex-wrap text-xs text-gray-500 dark:text-slate-400 mb-1.5">
+                                {rec.impactCategory && <span>{rec.impactCategory}</span>}
+                                {rec.resource && <span className="truncate max-w-[200px]" title={rec.resource}>Resource: {rec.resource}</span>}
+                              </div>
                               <div className="flex items-center gap-3 flex-wrap">
                                 <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">{rec.savings}</span>
                                 <span className={cn(
@@ -418,14 +448,14 @@ export default function OptimizationAgentPage() {
                                 )}>
                                   {rec.effort} Effort
                                 </span>
-                                {rec.impact && (
+                                {rec.severity && (
                                   <span className={cn(
                                     "text-xs px-2 py-0.5 rounded-full font-medium",
-                                    rec.impact === "High" ? "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400" :
-                                    rec.impact === "Medium" ? "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400" :
+                                    rec.severity === "High" ? "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400" :
+                                    rec.severity === "Medium" ? "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400" :
                                     "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400"
                                   )}>
-                                    {rec.impact} Impact
+                                    {rec.severity} Severity
                                   </span>
                                 )}
                                 {state !== "pending" && (
@@ -446,7 +476,7 @@ export default function OptimizationAgentPage() {
                               className={cn(
                                 "h-8 flex-shrink-0 transition-all",
                                 state === "completed" && "bg-emerald-500 hover:bg-emerald-600 text-white",
-                                state === "failed" && "bg-red-500 hover:bg-red-600 text-white"
+                                state === "failed" && "bg-red-500 hover:bg-red-500 text-white"
                               )}
                             >
                               {state === "validating" ? "Validating..." :
@@ -499,26 +529,41 @@ export default function OptimizationAgentPage() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs text-gray-500 dark:text-slate-400">Month-to-Date</span>
-                        <span className="text-sm font-semibold text-gray-900 dark:text-white">{formatCurrency(mtd, currency)}</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs text-gray-500 dark:text-slate-400">Forecast</span>
-                        <span className="text-sm font-semibold text-amber-600 dark:text-amber-400">{formatCurrency(forecast, currency)}</span>
-                      </div>
-                      {budgetConfigured && (
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs text-gray-500 dark:text-slate-400">Budget</span>
-                          <span className="text-sm font-semibold text-gray-900 dark:text-white">{formatCurrency(budgetAmount!, currency)}</span>
+                    {Object.keys(costByService).length > 0 ? (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-gray-500 dark:text-slate-400">MTD</span>
+                          <span className="font-semibold text-gray-900 dark:text-white">{formatCurrency(mtd, currency)}</span>
                         </div>
-                      )}
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs text-gray-500 dark:text-slate-400">Cost by Service</span>
-                        <span className="text-sm font-semibold text-gray-900 dark:text-white">{Object.keys(costByService).length} services</span>
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-gray-500 dark:text-slate-400">Forecast</span>
+                          <span className="font-semibold text-amber-600 dark:text-amber-400">{formatCurrency(forecast, currency)}</span>
+                        </div>
+                        {budgetConfigured && (
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-gray-500 dark:text-slate-400">Budget</span>
+                            <span className="font-semibold text-gray-900 dark:text-white">{formatCurrency(budgetAmount!, currency)}</span>
+                          </div>
+                        )}
+                        <div className="pt-2">
+                          <p className="text-[10px] font-medium text-gray-500 dark:text-slate-400 mb-2">Cost by Service</p>
+                          <ResponsiveContainer width="100%" height={120}>
+                            <BarChart data={Object.entries(costByService).sort(([, a], [, b]) => b - a).slice(0, 6).map(([name, value]) => ({ name: name.length > 12 ? name.slice(0, 12) + "..." : name, value }))} margin={{ top: 0, right: 0, left: -10, bottom: 0 }}>
+                              <XAxis dataKey="name" tick={{ fontSize: 8, fill: '#6b7280' }} axisLine={false} tickLine={false} />
+                              <YAxis tick={{ fontSize: 8, fill: '#6b7280' }} axisLine={false} tickLine={false} width={20} />
+                              <Tooltip contentStyle={{ fontSize: 10, borderRadius: 6, border: '1px solid #e5e7eb', padding: '4px 8px' }} />
+                              <Bar dataKey="value" radius={[2, 2, 0, 0]} maxBarSize={24}>
+                                {Object.entries(costByService).sort(([, a], [, b]) => b - a).slice(0, 6).map((_, i) => (
+                                  <Cell key={i} fill={["#3b82f6", "#22c55e", "#f59e0b", "#a855f7", "#ef4444", "#06b6d4"][i % 6]} />
+                                ))}
+                              </Bar>
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
                       </div>
-                    </div>
+                    ) : (
+                      <p className="text-xs text-gray-400 dark:text-slate-500 text-center py-4">No billing data available. Resync to fetch cost data from Azure Cost Management.</p>
+                    )}
                   </CardContent>
                 </Card>
 
@@ -591,15 +636,23 @@ export default function OptimizationAgentPage() {
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-2">
-                      {["Cost", "Security", "Performance", "HighAvailability"].map((cat) => {
-                        const count = advisorRecs.filter((r: any) => (r.category || "").toLowerCase() === cat.toLowerCase()).length;
+                      {["High", "Medium", "Low"].map((imp) => {
+                        const count = advisorRecs.filter((r: any) => (r.impact || "Low") === imp).length;
                         return (
-                          <div key={cat} className="flex items-center justify-between">
-                            <span className="text-xs text-gray-500 dark:text-slate-400">{cat}</span>
+                          <div key={imp} className="flex items-center justify-between">
+                            <span className={cn(
+                              "text-xs font-medium",
+                              imp === "High" ? "text-red-600 dark:text-red-400" :
+                              imp === "Medium" ? "text-amber-600 dark:text-amber-400" :
+                              "text-blue-600 dark:text-blue-400"
+                            )}>{imp} Impact</span>
                             <span className="text-xs font-semibold text-gray-900 dark:text-white">{count}</span>
                           </div>
                         );
                       })}
+                      {advisorRecs.length === 0 && (
+                        <p className="text-xs text-gray-400 dark:text-slate-500 text-center pt-2">No recommendations from Azure Advisor</p>
+                      )}
                     </div>
                   </CardContent>
                 </Card>

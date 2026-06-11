@@ -5,7 +5,7 @@ metadata:
   namespace: default
   labels:
     app: infralift-backend
-    version: v1.2.0
+    version: v1.10.0
 spec:
   replicas: 5
   selector:
@@ -15,17 +15,21 @@ spec:
     metadata:
       labels:
         app: infralift-backend
-        version: v1.2.0
+        version: v1.10.0
     spec:
       containers:
       - name: backend
-        image: myadmin12/infralift-backend:1.2.0
+        image: myadmin12/infralift-backend:1.10.0
         imagePullPolicy: Always
         ports:
         - containerPort: 8000
           name: http
           protocol: TCP
         env:
+        - name: MONGO_URI
+          value: "mongodb://mongodb-service:27017"
+        - name: MONGO_DB_NAME
+          value: "infralift"
         - name: REDIS_HOST
           value: "redis-service"
         - name: REDIS_PORT
@@ -71,6 +75,15 @@ spec:
             secretKeyRef:
               name: azure-openai-secrets
               key: deployment
+        # AI Provider Configuration
+        - name: AI_PROVIDER
+          value: "azure-openai"
+        # HuggingFace API Key (for AI_PROVIDER=huggingface)
+        - name: HF_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: ai-secrets
+              key: hf-api-key
         # Storage Connection String
         - name: STORAGE_CONNECTION_STRING
           valueFrom:

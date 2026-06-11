@@ -32,6 +32,10 @@ class AnalyzeTenantRequest(BaseModel):
     question: str
     context: Optional[Dict[str, Any]] = None
     user_id: Optional[str] = None
+    azure_endpoint: Optional[str] = None
+    azure_key: Optional[str] = None
+    azure_deployment: Optional[str] = None
+    azure_api_version: Optional[str] = None
 
 
 class AnalyzeTenantResponse(BaseModel):
@@ -111,11 +115,10 @@ async def ai_chat(request: ChatRequest):
         full_response = ""
 
         # Phase 1: Activity - Understanding request
-        events.append(ActivityEvent(type="activity", icon="MessageSquare", title="Request Understood", status="in_progress"))
         events.append(ActivityEvent(type="activity", icon="MessageSquare", title="Request Understood", status="completed"))
 
         # Phase 2: Activity - Resource Analysis
-        events.append(ActivityEvent(type="activity", icon="Search", title="Resource Analysis", status="in_progress"))
+        events.append(ActivityEvent(type="activity", icon="Search", title="Resource Analysis", status="completed"))
 
         redis = await session_manager.redis
         resource_context = {}
@@ -142,8 +145,6 @@ async def ai_chat(request: ChatRequest):
                             tenant_context = cached
             except Exception:
                 pass
-
-        events.append(ActivityEvent(type="activity", icon="Search", title="Resource Analysis", status="completed"))
 
         # Phase 3: Activity - Generating response
         events.append(ActivityEvent(type="activity", icon="Zap", title="Generating Response", status="in_progress"))
@@ -176,13 +177,10 @@ async def ai_chat(request: ChatRequest):
                 full_response += chunk.get("content", "")
                 events.append(ActivityEvent(type="content", content=chunk.get("content", ""), title=chunk.get("full_response", "")))
             elif chunk.get("type") == "status":
-                if chunk.get("status") == "generating":
-                    events.append(ActivityEvent(type="activity", icon="Zap", title="Generating Response", status="in_progress"))
-                elif chunk.get("status") == "completed":
+                if chunk.get("status") == "completed":
                     events.append(ActivityEvent(type="activity", icon="CheckCircle", title="Response Ready", status="completed"))
 
         # Phase 4: Audit
-        events.append(ActivityEvent(type="activity", icon="ClipboardList", title="Recording Audit Trail", status="in_progress"))
         if redis:
             audit_service.redis_client = redis
             try:
@@ -194,9 +192,10 @@ async def ai_chat(request: ChatRequest):
                     "deploymentStatus": "completed",
                     "metadata": {"response_length": len(full_response)},
                 })
+                events.append(ActivityEvent(type="activity", icon="ClipboardList", title="Audit Recorded", status="completed"))
             except Exception as e:
                 logger.error(f"Audit record failed: {e}")
-        events.append(ActivityEvent(type="activity", icon="ClipboardList", title="Audit Recorded", status="completed"))
+                events.append(ActivityEvent(type="activity", icon="AlertTriangle", title="Audit failed", status="error"))
 
         # Final
         events.append(ActivityEvent(type="result", icon="CheckCircle", title="Final Answer", status="completed", data={"response_length": len(full_response)}))
@@ -223,26 +222,30 @@ async def analyze_tenant_data(request: AnalyzeTenantRequest):
                     if cached:
                         tenant_context["tenant_summary"] = cached
 
-        system_prompt = (
-            "You are an Azure infrastructure expert assistant. "
-            "Analyze the provided tenant data and answer the user's question with specific, actionable insights. "
-            "Include relevant metrics, costs, and recommendations where applicable. "
-            "Be concise and data-driven."
-        )
+        azure_creds = None
+        if request.azure_endpoint and request.azure_key:
+            azure_creds = {
+                "azure_endpoint": request.azure_endpoint,
+                "azure_key": request.azure_key,
+                "azure_deployment": request.azure_deployment or settings.AZURE_OPENAI_DEPLOYMENT,
+                "azure_api_version": request.azure_api_version or settings.AZURE_OPENAI_API_VERSION,
+            }
 
         response_text = ""
-        async for chunk in ai_service._execute_azure_openai(
+        async for chunk in ai_service.execute_chat(
             message=request.question,
-            system_prompt=system_prompt,
-            conversation_context={"tenant_data": tenant_context}
+            agent_type="assessment",
+            user_id=request.user_id or "default",
+            conversation_context={"tenant_data": tenant_context},
+            tenant_context=tenant_context,
+            azure_credentials=azure_creds,
         ):
             if chunk.get("type") == "content":
                 response_text += chunk.get("content", "")
 
         if not response_text:
             response_text = (
-                "Tenant data analysis requires Azure OpenAI to be configured. "
-                "Please set AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_KEY in your environment."
+                "No AI provider is available. Please configure Azure OpenAI or HuggingFace."
             )
 
         return AnalyzeTenantResponse(

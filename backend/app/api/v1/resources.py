@@ -155,24 +155,6 @@ async def list_resources(
     return resources[skip:skip + limit]
 
 
-@router.get("/{resource_id}")
-async def get_resource(resource_id: str, user_id: Optional[str] = Query(None)):
-    """Get specific resource details from cache"""
-    data, _ = await _get_cached_data(user_id)
-
-    for category in ["virtual_machines", "storage_accounts", "sql_databases",
-                     "network_resources", "key_vaults", "web_apps", "container_instances"]:
-        for resource in data.get(category, []):
-            if resource["id"] == resource_id:
-                return {
-                    "resource": resource,
-                    "category": category,
-                    "synced_at": data.get("synced_at")
-                }
-
-    raise HTTPException(status_code=404, detail=f"Resource {resource_id} not found")
-
-
 @router.get("/stats/summary")
 async def get_resource_stats(user_id: Optional[str] = Query(None)):
     """Get resource statistics summary from real data"""
@@ -216,7 +198,7 @@ async def get_resource_stats(user_id: Optional[str] = Query(None)):
         "costs": {
             "month_to_date": cost_data.get("month_to_date", 0),
             "forecast": cost_data.get("forecast", 0),
-            "currency": cost_data.get("currency", "USD")
+            "currency": cost_data.get("currency", "")
         },
         "security": {
             "secure_score": security.get("secure_score", 0),
@@ -242,6 +224,17 @@ async def get_resource_metrics(user_id: Optional[str] = Query(None)):
         "metrics": metrics,
         "synced_at": data.get("synced_at")
     }
+
+
+@router.get("/billing-currency")
+async def get_billing_currency(user_id: Optional[str] = Query(None)):
+    """Get the tenant's billing currency code (INR, USD, EUR, etc.)"""
+    try:
+        data, _ = await _get_cached_data(user_id)
+        cost_data = data.get("cost_data", {})
+        return {"currency": cost_data.get("currency", "")}
+    except Exception:
+        return {"currency": ""}
 
 
 @router.get("/stats/costs")
@@ -279,3 +272,33 @@ async def get_advisor_recommendations(user_id: Optional[str] = Query(None)):
         "count": len(recommendations),
         "synced_at": data.get("synced_at")
     }
+
+
+@router.get("/stats/compliance")
+async def get_compliance_data(user_id: Optional[str] = Query(None)):
+    """Get Azure Policy compliance data from cached sync"""
+    data, _ = await _get_cached_data(user_id)
+    compliance = data.get("compliance_data", {})
+
+    return {
+        "compliance": compliance,
+        "synced_at": data.get("synced_at")
+    }
+
+
+@router.get("/{resource_id}")
+async def get_resource(resource_id: str, user_id: Optional[str] = Query(None)):
+    """Get specific resource details from cache"""
+    data, _ = await _get_cached_data(user_id)
+
+    for category in ["virtual_machines", "storage_accounts", "sql_databases",
+                     "network_resources", "key_vaults", "web_apps", "container_instances"]:
+        for resource in data.get(category, []):
+            if resource["id"] == resource_id:
+                return {
+                    "resource": resource,
+                    "category": category,
+                    "synced_at": data.get("synced_at")
+                }
+
+    raise HTTPException(status_code=404, detail=f"Resource {resource_id} not found")

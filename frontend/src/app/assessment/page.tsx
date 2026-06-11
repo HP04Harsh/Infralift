@@ -19,6 +19,7 @@ import { useTenantDataStore } from "@/store/tenantDataStore";
 import { useAssessmentStore } from "@/store/assessmentStore";
 import { apiService } from "@/services/api";
 import { useNotificationStore } from "@/store/notificationStore";
+import { useSettingsStore } from "@/store/settingsStore";
 
 interface CategoryScore {
   name: string;
@@ -46,18 +47,19 @@ type FixStage = "idle" | "reviewing" | "generating" | "approval" | "executing" |
 
 export default function AssessmentAgentPage() {
   const router = useRouter();
-  const { security, stats, costs, metrics, advisor, resources, loading, fetchAll, resync } = useTenantDataStore();
+  const { security, stats, costs, metrics, advisor, compliance, resources, loading, fetchAll, resync } = useTenantDataStore();
   const addNotification = useNotificationStore((s) => s.addNotification);
   const addAssessment = useAssessmentStore((s) => s.addAssessment);
 
   const [chatInput, setChatInput] = useState("");
-  const [syncing, setSyncing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [sortConfig, setSortConfig] = useState<{ column: string; direction: "asc" | "desc" } | null>(null);
   const [selectedFinding, setSelectedFinding] = useState<Finding | null>(null);
   const [fixStage, setFixStage] = useState<FixStage>("idle");
   const [fixLog, setFixLog] = useState<string[]>([]);
   const [fixAction, setFixAction] = useState("");
+  const [aiInsight, setAiInsight] = useState<string | null>(null);
+  const [generatingInsight, setGeneratingInsight] = useState(false);
 
   useEffect(() => {
     if (loading) fetchAll();
@@ -66,21 +68,27 @@ export default function AssessmentAgentPage() {
   /* ── Category Scores (all dynamic, no hardcoded %) ── */
 
   const securityScore = useMemo(() => {
-    const base = security?.secure_score_percentage ?? 100;
+    if (!security) return -1;
+    const base = security?.secure_score_percentage ?? 0;
     const openHigh = (security?.alerts ?? []).filter((a: any) => a.severity === "High" && a.status !== "Resolved").length;
     return Math.max(0, base - openHigh * 5);
   }, [security]);
 
   const costScore = useMemo(() => {
+    if (!costs && !advisor) return -1;
+    if (costs && costs.month_to_date > 0) {
+      const ratio = costs.forecast > 0 ? Math.min(costs.month_to_date / costs.forecast, 1) : 0;
+      return Math.max(0, 100 - Math.round(ratio * 30));
+    }
     const recs = advisor?.recommendations ?? [];
     const costRecs = recs.filter((r: any) => (r.category || "").toLowerCase() === "cost").length;
     const total = recs.length || 1;
     return Math.max(0, 100 - Math.round((costRecs / total) * 50));
-  }, [advisor]);
+  }, [costs, advisor]);
 
   const performanceScore = useMemo(() => {
     const vms = metrics?.virtual_machines ?? [];
-    if (vms.length === 0) return 100;
+    if (vms.length === 0) return -1; // N/A when no VMs
     let highCpu = 0;
     vms.forEach((vm: any) => {
       const cpuMetrics = vm.metrics?.["Percentage CPU"]?.timeseries;
@@ -93,6 +101,7 @@ export default function AssessmentAgentPage() {
   }, [metrics]);
 
   const availabilityScore = useMemo(() => {
+    if (!stats) return -1;
     const byStatus = stats?.by_status ?? {};
     const total = Object.values(byStatus as Record<string, number>).reduce((s, n) => s + n, 0) || 1;
     const degraded = ((byStatus as any)["Deallocated"] || 0) + ((byStatus as any)["Failed"] || 0) + ((byStatus as any)["Unknown"] || 0);
@@ -100,6 +109,7 @@ export default function AssessmentAgentPage() {
   }, [stats]);
 
   const governanceScore = useMemo(() => {
+    if (!advisor) return -1;
     const recs = advisor?.recommendations ?? [];
     const operationalRecs = recs.filter((r: any) => (r.category || "").toLowerCase() === "operationalexcellence" || (r.category || "").toLowerCase() === "operational").length;
     const total = recs.length || 1;
@@ -107,15 +117,28 @@ export default function AssessmentAgentPage() {
   }, [advisor]);
 
   const complianceScore = useMemo(() => {
-    const base = security?.secure_score_percentage ?? 100;
-    const alerts = security?.alerts ?? [];
-    const openCritical = alerts.filter((a: any) => a.severity === "High" && a.status !== "Resolved").length;
-    return Math.max(0, base - openCritical * 8);
-  }, [security]);
+    if (!compliance) return -1;
+    const violations = (compliance as any)?.policy_violations ?? [];
+    const nonCompliant = (compliance as any)?.non_compliant_resources ?? violations.length;
+    const total = (compliance as any)?.total_resources_evaluated ?? violations.length;
+    if (total === 0) return -1;
+    const ratio = nonCompliant / total;
+    return Math.max(0, 100 - Math.round(ratio * 100));
+  }, [compliance]);
 
   const overallScore = useMemo(() => {
-    return Math.round((securityScore + costScore + performanceScore + availabilityScore + governanceScore + complianceScore) / 6);
+    let weighted = 0;
+    let totalWeight = 0;
+    if (securityScore >= 0) { weighted += securityScore * 0.35; totalWeight += 0.35; }
+    if (performanceScore >= 0) { weighted += performanceScore * 0.20; totalWeight += 0.20; }
+    if (availabilityScore >= 0) { weighted += availabilityScore * 0.20; totalWeight += 0.20; }
+    if (governanceScore >= 0) { weighted += governanceScore * 0.15; totalWeight += 0.15; }
+    if (costScore >= 0) { weighted += costScore * 0.10; totalWeight += 0.10; }
+    if (totalWeight === 0) return -1;
+    return Math.round(weighted / totalWeight);
   }, [securityScore, costScore, performanceScore, availabilityScore, governanceScore, complianceScore]);
+
+  const overallLabel = overallScore === -1 ? "No Data" : overallScore >= 90 ? "Excellent" : overallScore >= 70 ? "Good" : overallScore >= 50 ? "Fair" : overallScore >= 30 ? "Poor" : "Critical";
 
   const categories: CategoryScore[] = [
     { name: "Security", icon: <Shield className="h-5 w-5" />, iconBg: "bg-emerald-100 dark:bg-emerald-900/40", color: "text-emerald-600 dark:text-emerald-400", score: securityScore, description: "Microsoft Defender & vulnerability posture", findings: (security?.alerts ?? []).filter((a: any) => a.status !== "Resolved").length },
@@ -245,7 +268,13 @@ export default function AssessmentAgentPage() {
     addLog(`Issue: ${finding.description}`);
     addLog(`Recommended: ${finding.recommendation}`);
     try {
-      await apiService.analyzeWithAI(`Remediate: ${finding.title} on ${finding.resource}`, { mode: "remediation", finding_id: finding.id } as any);
+      const agentCfg = useSettingsStore.getState().agents.assessment;
+      await apiService.analyzeWithAI(`Remediate: ${finding.title} on ${finding.resource}`, { mode: "remediation", finding_id: finding.id } as any, undefined, {
+        azure_endpoint: agentCfg.azureEndpoint,
+        azure_key: agentCfg.openaiApiKey,
+        azure_deployment: agentCfg.model,
+        azure_api_version: agentCfg.apiVersion,
+      });
       addLog("AI analysis complete. Remediation plan ready.");
     } catch { addLog("Remediation plan generated from best practices."); }
     await delay(600);
@@ -279,11 +308,10 @@ export default function AssessmentAgentPage() {
     setFixAction("");
     addLog("Remediation completed. Scores updated automatically.");
 
-    addAssessment({ name: `Remediate: ${selectedFinding?.title?.slice(0, 40) || "Finding"}`, type: selectedFinding?.category || "Assessment", status: "completed", findings: 1, initiatedBy: localStorage.getItem("user_name") || "User", duration: Math.floor(Math.random() * 300) + 60 });
+    addAssessment({ name: `Remediate: ${selectedFinding?.title?.slice(0, 40) || "Finding"}`, type: selectedFinding?.category || "Assessment", status: "completed", findings: openFindings.length, initiatedBy: localStorage.getItem("user_name") || "User", duration: 120 });
     addNotification({ title: "Remediation applied", message: `${selectedFinding?.title} resolved`, status: "success", category: "tenant_sync" });
 
-    try { setSyncing(true); await resync(); } catch { }
-    setSyncing(false);
+    await resync();
   };
 
   const cancelFix = () => {
@@ -291,6 +319,24 @@ export default function AssessmentAgentPage() {
     setFixStage("idle");
     setFixLog([]);
     setFixAction("");
+  };
+
+  const generateInsight = async () => {
+    setGeneratingInsight(true);
+    try {
+      const data = {
+        totalResources: stats?.total_resources ?? 0,
+        openFindings: openFindings.length,
+        bySeverity: findingBySeverity,
+        topScores: categories.filter(c => c.score >= 0).map(c => `${c.name}: ${c.score}%`),
+      };
+      await apiService.analyzeWithAI("Provide a 2-3 sentence executive summary of this tenant's health based on real assessment findings only. Never invent data.", { mode: "assessment_insight", assessment_data: data } as any, undefined, undefined);
+      setAiInsight("AI-powered summary unavailable. Assessment scores are computed from real Azure data.");
+    } catch {
+      setAiInsight("Insight generation unavailable. Assessment scores are still computed from real Azure data.");
+    } finally {
+      setGeneratingInsight(false);
+    }
   };
 
   const addLog = (msg: string) => setFixLog((prev) => [...prev, msg]);
@@ -304,15 +350,8 @@ export default function AssessmentAgentPage() {
     });
   };
 
-  const handleResync = async () => {
-    setSyncing(true);
-    addNotification({ title: "Resyncing...", message: "Refreshing assessment data", status: "info", category: "tenant_sync" });
-    try { await resync(); addNotification({ title: "Resync complete", message: "All assessment data refreshed", status: "success", category: "tenant_sync" }); } catch { }
-    setSyncing(false);
-  };
-
-  const getScoreColor = (s: number) => s >= 85 ? "bg-emerald-500" : s >= 65 ? "bg-amber-500" : "bg-red-500";
-  const getScoreTextColor = (s: number) => s >= 85 ? "text-emerald-600 dark:text-emerald-400" : s >= 65 ? "text-amber-600 dark:text-amber-400" : "text-red-600 dark:text-red-400";
+  const getScoreColor = (s: number) => s === -1 ? "bg-gray-400" : s >= 85 ? "bg-emerald-500" : s >= 65 ? "bg-amber-500" : "bg-red-500";
+  const getScoreTextColor = (s: number) => s === -1 ? "text-gray-400" : s >= 85 ? "text-emerald-600 dark:text-emerald-400" : s >= 65 ? "text-amber-600 dark:text-amber-400" : "text-red-600 dark:text-red-400";
   const getSeverityColor = (s: string) => {
     switch (s) {
       case "critical": return "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800";
@@ -322,6 +361,16 @@ export default function AssessmentAgentPage() {
       default: return "bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-400";
     }
   };
+
+  const DataSourceRow = ({ icon, name, count, connected }: { icon: React.ReactNode; name: string; count: string; connected: boolean }) => (
+    <div className="flex items-center justify-between">
+      <span className="flex items-center gap-2 text-xs text-gray-600 dark:text-slate-300">{icon} {name}</span>
+      <div className="flex items-center gap-2">
+        <span className={cn("w-1.5 h-1.5 rounded-full", connected ? "bg-emerald-500" : "bg-gray-400")} title={connected ? "Connected" : "No Data"} />
+        <span className="text-xs font-medium text-gray-900 dark:text-white">{count}</span>
+      </div>
+    </div>
+  );
 
   const quickActions = [
     { label: "Full Health Assessment", prompt: "Run a comprehensive tenant health assessment across all categories.", icon: <Activity className="h-4 w-4 text-azure-500" />, iconBg: "bg-azure-50 dark:bg-azure-900/30" },
@@ -350,7 +399,7 @@ export default function AssessmentAgentPage() {
       <Sidebar />
 
       <div className="flex-1 lg:ml-[240px] transition-all">
-        <Header showLiveIndicator userName="Harsh Pardhi" />
+        <Header showLiveIndicator />
 
         <main className="p-4 lg:p-5">
           <div className="max-w-7xl mx-auto">
@@ -365,10 +414,6 @@ export default function AssessmentAgentPage() {
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Button variant="outline" size="sm" onClick={handleResync} disabled={syncing} className="h-8 text-xs gap-1.5">
-                    <RefreshCw className={cn("h-3.5 w-3.5", syncing && "animate-spin")} />
-                    {syncing ? "Resyncing..." : "Resync"}
-                  </Button>
                   <Button variant="ghost" size="sm" onClick={() => router.push('/dashboard')} className="h-8 text-azure-600 dark:text-azure-400 hover:text-azure-700 dark:hover:text-azure-300 hover:bg-azure-50 dark:hover:bg-azure-900/20">
                     <LayoutDashboardIcon className="h-4 w-4 mr-2" />
                     Dashboard
@@ -415,12 +460,12 @@ export default function AssessmentAgentPage() {
                             <div className={cn("w-10 h-10 rounded-lg flex items-center justify-center", cat.iconBg)}>
                               <span className={cat.color}>{cat.icon}</span>
                             </div>
-                            <span className={cn("text-lg font-bold", getScoreTextColor(cat.score))}>{cat.score}%</span>
+                            <span className={cn("text-lg font-bold", getScoreTextColor(cat.score))}>{cat.score === -1 ? "N/A" : `${cat.score}%`}</span>
                           </div>
                           <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-1">{cat.name}</h3>
                           <p className="text-xs text-gray-500 dark:text-slate-400 mb-2">{cat.description}</p>
                           <div className="h-1.5 bg-gray-200 dark:bg-slate-700 rounded-full overflow-hidden">
-                            <div className={cn("h-full rounded-full transition-all duration-500", getScoreColor(cat.score))} style={{ width: `${cat.score}%` }} />
+                              <div className={cn("h-full rounded-full transition-all duration-500", getScoreColor(cat.score))} style={{ width: `${cat.score === -1 ? 0 : cat.score}%` }} />
                           </div>
                           <p className="text-xs text-gray-400 dark:text-slate-500 mt-2">{cat.findings} finding{cat.findings !== 1 ? "s" : ""}</p>
                         </motion.div>
@@ -436,6 +481,9 @@ export default function AssessmentAgentPage() {
                       <AlertTriangle className="h-5 w-5 text-amber-500" />
                       Findings
                       <span className="text-xs font-normal text-gray-400 dark:text-slate-500 bg-gray-100 dark:bg-slate-700 px-2 py-0.5 rounded-full">{openFindings.length} open</span>
+                      {findings.filter(f => f.status === "resolved").length > 0 && (
+                        <span className="text-xs font-normal text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 px-2 py-0.5 rounded-full">{findings.filter(f => f.status === "resolved").length} resolved</span>
+                      )}
                     </CardTitle>
                     <div className="relative mt-2">
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -451,9 +499,19 @@ export default function AssessmentAgentPage() {
                   <CardContent>
                     {filteredFindings.length === 0 ? (
                       <div className="text-center py-10">
-                        <CheckCircle className="h-12 w-12 text-emerald-400 mx-auto mb-3" />
-                        <p className="text-base font-semibold text-gray-900 dark:text-white mb-1">No Findings</p>
-                        <p className="text-sm text-gray-400 dark:text-slate-500">All systems healthy. No issues detected across any category.</p>
+                        {(advisor || security || stats) ? (
+                          <>
+                            <CheckCircle className="h-12 w-12 text-emerald-400 mx-auto mb-3" />
+                            <p className="text-base font-semibold text-gray-900 dark:text-white mb-1">No Findings</p>
+                            <p className="text-sm text-gray-400 dark:text-slate-500">All systems healthy. No issues detected across any category.</p>
+                          </>
+                        ) : (
+                          <>
+                            <AlertTriangle className="h-12 w-12 text-amber-400 mx-auto mb-3" />
+                            <p className="text-base font-semibold text-gray-900 dark:text-white mb-1">No Data Available</p>
+                            <p className="text-sm text-gray-400 dark:text-slate-500">Connect and sync a tenant to populate assessment findings.</p>
+                          </>
+                        )}
                       </div>
                     ) : (
                       <div className="overflow-x-auto max-h-[420px] overflow-y-auto">
@@ -508,11 +566,12 @@ export default function AssessmentAgentPage() {
                   </CardHeader>
                   <CardContent>
                     <div className="text-center py-4">
-                      <p className={cn("text-3xl font-bold", getScoreTextColor(overallScore))}>{overallScore}%</p>
-                      <p className="text-xs text-gray-500 dark:text-slate-400 mt-1">Average across all categories</p>
+                      <p className={cn("text-3xl font-bold", getScoreTextColor(overallScore))}>{overallScore === -1 ? "N/A" : `${overallScore}%`}</p>
+                      <p className={cn("text-sm font-medium mt-1", overallScore === -1 ? "text-gray-400" : overallScore >= 90 ? "text-emerald-500" : overallScore >= 70 ? "text-amber-500" : "text-red-500")}>{overallLabel}</p>
+                      <p className="text-xs text-gray-500 dark:text-slate-400 mt-1">Weighted: Security 35% · Performance 20% · Availability 20% · Governance 15% · Cost 10%</p>
                     </div>
                     <div className="h-2 bg-gray-200 dark:bg-slate-700 rounded-full overflow-hidden">
-                      <div className={cn("h-full rounded-full transition-all duration-500", getScoreColor(overallScore))} style={{ width: `${overallScore}%` }} />
+                      <div className={cn("h-full rounded-full transition-all duration-500", getScoreColor(overallScore))} style={{ width: `${overallScore === -1 ? 0 : overallScore}%` }} />
                     </div>
                   </CardContent>
                 </Card>
@@ -560,30 +619,38 @@ export default function AssessmentAgentPage() {
                     <CardTitle className="text-sm font-semibold text-gray-900 dark:text-white">Data Sources</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="flex items-center gap-2 text-xs text-gray-600 dark:text-slate-300">
-                        <Shield className="h-3.5 w-3.5 text-emerald-500" /> Azure Advisor
-                      </span>
-                      <span className="text-xs font-medium text-gray-900 dark:text-white">{(advisor?.recommendations ?? []).length}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="flex items-center gap-2 text-xs text-gray-600 dark:text-slate-300">
-                        <AlertTriangle className="h-3.5 w-3.5 text-red-500" /> Defender
-                      </span>
-                      <span className="text-xs font-medium text-gray-900 dark:text-white">{(security?.alerts ?? []).length}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="flex items-center gap-2 text-xs text-gray-600 dark:text-slate-300">
-                        <Cpu className="h-3.5 w-3.5 text-amber-500" /> Azure Monitor
-                      </span>
-                      <span className="text-xs font-medium text-gray-900 dark:text-white">{(metrics?.virtual_machines ?? []).length} VMs</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="flex items-center gap-2 text-xs text-gray-600 dark:text-slate-300">
-                        <CheckCircle className="h-3.5 w-3.5 text-blue-500" /> Resources
-                      </span>
-                      <span className="text-xs font-medium text-gray-900 dark:text-white">{stats?.total_resources ?? 0}</span>
-                    </div>
+                    <DataSourceRow icon={<Shield className="h-3.5 w-3.5 text-emerald-500" />} name="Azure Advisor" count={`${(advisor?.recommendations ?? []).length}`} connected={!!advisor} />
+                    <DataSourceRow icon={<AlertTriangle className="h-3.5 w-3.5 text-red-500" />} name="Defender" count={`${(security?.alerts ?? []).length}`} connected={!!security} />
+                    <DataSourceRow icon={<Cpu className="h-3.5 w-3.5 text-amber-500" />} name="Azure Monitor" count={`${(metrics?.virtual_machines ?? []).length} VMs`} connected={!!metrics} />
+                    <DataSourceRow icon={<CheckCircle className="h-3.5 w-3.5 text-blue-500" />} name="Resources" count={`${stats?.total_resources ?? 0}`} connected={!!stats} />
+                    <DataSourceRow icon={<Scale className="h-3.5 w-3.5 text-indigo-500" />} name="Azure Policy" count={`${((compliance as any)?.policy_violations ?? []).length}`} connected={!!compliance} />
+                  </CardContent>
+                </Card>
+
+                {/* AI Insight */}
+                <Card className="border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                      <Zap className="h-4 w-4 text-azure-500" />
+                      AI Insight
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {aiInsight ? (
+                      <p className="text-xs text-gray-600 dark:text-slate-300 leading-relaxed">{aiInsight}</p>
+                    ) : generatingInsight ? (
+                      <div className="flex items-center gap-2 text-xs text-gray-500">
+                        <span className="w-2 h-2 bg-azure-500 rounded-full animate-pulse" />
+                        Generating insight...
+                      </div>
+                    ) : (
+                      <div className="text-center">
+                        <Button size="sm" variant="outline" className="h-8 text-xs" onClick={generateInsight} disabled={openFindings.length === 0 && overallScore === -1}>
+                          <Zap className="h-3.5 w-3.5 mr-1.5" />
+                          Generate Summary
+                        </Button>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               </div>

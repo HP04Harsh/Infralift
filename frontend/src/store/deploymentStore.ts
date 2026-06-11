@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { useNotificationStore } from './notificationStore';
 
 export type DeploymentStatus = "completed" | "in-progress" | "failed";
 
@@ -36,6 +37,25 @@ export const useDeploymentStore = create<DeploymentState>()(
         set((state) => ({
           deployments: [newDeployment, ...state.deployments],
         }));
+        if (deployment.status === "completed") {
+          useNotificationStore.getState().addNotification({
+            title: `Deployment completed: ${deployment.name}`,
+            message: `${deployment.type} "${deployment.name}" deployed successfully`,
+            status: "success",
+            category: "deployment",
+            source: "deployment",
+            severity: "info",
+          });
+        } else if (deployment.status === "failed") {
+          useNotificationStore.getState().addNotification({
+            title: `Deployment failed: ${deployment.name}`,
+            message: `${deployment.type} "${deployment.name}" deployment failed`,
+            status: "error",
+            category: "deployment",
+            source: "deployment",
+            severity: "high",
+          });
+        }
       },
 
       setDeployments: (deployments) => {
@@ -43,11 +63,37 @@ export const useDeploymentStore = create<DeploymentState>()(
       },
 
       updateStatus: (id, status) => {
-        set((state) => ({
-          deployments: state.deployments.map((d) =>
-            d.id === id ? { ...d, status } : d
-          ),
-        }));
+        let name = "";
+        set((state) => {
+          const dep = state.deployments.find((d) => d.id === id);
+          if (dep) name = dep.name;
+          return {
+            deployments: state.deployments.map((d) =>
+              d.id === id ? { ...d, status } : d
+            ),
+          };
+        });
+        if (name) {
+          if (status === "completed") {
+            useNotificationStore.getState().addNotification({
+              title: `Deployment completed: ${name}`,
+              message: `Deployment "${name}" finished successfully`,
+              status: "success",
+              category: "deployment",
+              source: "deployment",
+              severity: "info",
+            });
+          } else if (status === "failed") {
+            useNotificationStore.getState().addNotification({
+              title: `Deployment failed: ${name}`,
+              message: `Deployment "${name}" failed`,
+              status: "error",
+              category: "deployment",
+              source: "deployment",
+              severity: "high",
+            });
+          }
+        }
       },
 
       getByStatus: (status) => {

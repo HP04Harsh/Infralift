@@ -5,6 +5,7 @@ from app.schemas.onboarding import (
     VerificationResponse,
     ConnectTenantRequest,
     ConnectTenantResponse,
+    TenantConnection,
     ResourceSync,
     SyncStatus,
     Requirement,
@@ -13,8 +14,8 @@ from app.schemas.onboarding import (
 from app.core.redis import session_manager
 from app.services.azure_auth_service import AzureAuthService
 from app.services.azure_sync_service import AzureSyncService
+from app.services.event_bus import event_bus
 from app.core.config import settings
-import random
 import asyncio
 import logging
 
@@ -35,39 +36,48 @@ class OnboardingService:
     
     async def verify_assignment(self, request: VerificationRequest) -> VerificationResponse:
         """
-        Verify Azure CLI command execution
-        In production, this would call Azure APIs to verify
+        Verify Azure CLI command execution by checking actual Azure resource state
         """
-        # Simulate verification delay
-        import asyncio
-        await asyncio.sleep(1)
-        
-        # Mock verification - in production, verify with Azure
-        # For demo, random success
-        success = random.random() > 0.2  # 80% success rate
-        
-        if success:
-            # Update session with verification status
-            session_id = f"session:{request.user_id}"
-            await session_manager.update_session(
-                session_id,
-                {
-                    f"verified_cards.{request.card_id}": True,
-                    "last_updated": datetime.utcnow().isoformat()
-                }
+        session_id = f"session:{request.user_id}"
+        session_data = await session_manager.get_session(session_id)
+
+        cached_creds = None
+        if session_data:
+            cached_creds = self.azure_auth_service.get_cached_credentials(
+                session_data.get("tenant_id", ""),
+                session_data.get("subscription_id", "")
             )
-            
-            return VerificationResponse(
-                success=True,
-                message="Assignment verified successfully",
-                timestamp=datetime.utcnow()
-            )
-        else:
-            return VerificationResponse(
-                success=False,
-                message="Verification failed. Please ensure command was executed correctly.",
-                timestamp=datetime.utcnow()
-            )
+
+        if cached_creds and cached_creds.get("credentials"):
+            try:
+                from azure.mgmt.resource import ResourceManagementClient
+                client = ResourceManagementClient(
+                    credential=cached_creds["credentials"],
+                    subscription_id=cached_creds["subscription_id"]
+                )
+                rgs = list(client.resource_groups.list())
+                has_resources = len(rgs) > 0
+                if has_resources:
+                    await session_manager.update_session(
+                        session_id,
+                        {
+                            f"verified_cards.{request.card_id}": True,
+                            "last_updated": datetime.utcnow().isoformat()
+                        }
+                    )
+                    return VerificationResponse(
+                        success=True,
+                        message="Assignment verified — Azure resources detected.",
+                        timestamp=datetime.utcnow()
+                    )
+            except Exception as e:
+                logger.warning(f"Azure verification failed: {e}")
+
+        return VerificationResponse(
+            success=False,
+            message="Verification failed. Azure credentials are needed, or no resources found. Please ensure you completed the assignment correctly and resync.",
+            timestamp=datetime.utcnow()
+        )
     
     async def connect_tenant(self, request: ConnectTenantRequest) -> ConnectTenantResponse:
         """
@@ -80,32 +90,7 @@ class OnboardingService:
                 message="All fields (Client ID, Client Secret, Tenant ID, Subscription ID) are required"
             )
         
-        # Perform real Azure validation
-        validation_result = await self.azure_auth_service.validate_tenant_connection(
-            client_id=request.client_id,
-            client_secret=request.client_secret,
-            tenant_id=request.tenant_id,
-            subscription_id=request.subscription_id
-        )
-        
-        if not validation_result["success"]:
-            # Map Azure errors to user-friendly messages
-            error_messages = {
-                "AUTHENTICATION_FAILED": "Invalid Azure credentials. Please check your Client ID and Secret.",
-                "SUBSCRIPTION_NOT_ACCESSIBLE": "The subscription is not accessible with provided credentials.",
-                "API_REQUEST_FAILED": "Azure API request failed. Please check your network connection.",
-                "VALIDATION_ERROR": "An unexpected error occurred during validation."
-            }
-            
-            error_code = validation_result.get("error", "VALIDATION_ERROR")
-            message = error_messages.get(error_code, validation_result.get("message", "Connection failed"))
-            
-            return ConnectTenantResponse(
-                success=False,
-                message=message
-            )
-        
-        # Ensure session exists, then update with connection info
+        # Save session data FIRST so it persists even if Azure validation is unavailable
         session_id = f"session:{request.user_id}"
         await self.get_or_create_session(request.user_id)
         await session_manager.update_session(
@@ -115,23 +100,64 @@ class OnboardingService:
                 "tenant_id": request.tenant_id,
                 "subscription_id": request.subscription_id,
                 "environment_name": request.environment_name,
-                "connection_details": validation_result,
                 "current_step": 3,
                 "completed_steps": [1, 2],
                 "last_updated": datetime.utcnow().isoformat()
             }
         )
+
+        # Build credentials even if validation fails, so sync can use them later
+        try:
+            from azure.identity import ClientSecretCredential
+            creds = ClientSecretCredential(
+                tenant_id=request.tenant_id,
+                client_id=request.client_id,
+                client_secret=request.client_secret
+            )
+            self.azure_auth_service.credentials_cache[f"{request.tenant_id}_{request.subscription_id}"] = {
+                "credentials": creds,
+                "tenant_id": request.tenant_id,
+                "subscription_id": request.subscription_id
+            }
+        except Exception:
+            pass
+
+        # Perform real Azure validation (optional — session is already saved)
+        validation_result = await self.azure_auth_service.validate_tenant_connection(
+            client_id=request.client_id,
+            client_secret=request.client_secret,
+            tenant_id=request.tenant_id,
+            subscription_id=request.subscription_id
+        )
+        
+        if not validation_result["success"]:
+            # Session data is already saved, so return a partial success
+            return ConnectTenantResponse(
+                success=True,
+                message="Tenant credentials saved. Azure validation could not be completed — you may still sync resources.",
+                connection=TenantConnection(
+                    tenant_id=request.tenant_id,
+                    subscription_id=request.subscription_id,
+                    environment_name=request.environment_name,
+                    validated=False
+                )
+            )
+
+        # Update session with validation details
+        await session_manager.update_session(
+            session_id,
+            {"connection_details": validation_result}
+        )
         
         return ConnectTenantResponse(
             success=True,
-            message="Tenant connected successfully",
-            connection={
-                "tenant_id": request.tenant_id,
-                "subscription_id": request.subscription_id,
-                "display_name": validation_result["subscription"]["display_name"],
-                "state": validation_result["subscription"]["state"],
-                "providers": validation_result["providers"]
-            }
+            message="Tenant connected successfully. Credentials saved — you can sync resources now.",
+            connection=TenantConnection(
+                tenant_id=request.tenant_id,
+                subscription_id=request.subscription_id,
+                environment_name=request.environment_name,
+                validated=True
+            )
         )
     
     async def get_sync_status(self, user_id: str) -> ResourceSync:
@@ -230,22 +256,26 @@ class OnboardingService:
                     }
                 )
             else:
-                # Sync failed
+                sync_errors = sync_result.get("errors", {}) or {}
+                error_msgs = [f"{k}: {v}" for k, v in sync_errors.items()]
+                error_detail = sync_result.get("error") or sync_result.get("message") or "; ".join(error_msgs) or "Sync failed"
                 failed_sync_state = {
-                    "total_resources": 0,
-                    "synced_resources": 0,
+                    "total_resources": sync_result.get("total_resources", 0),
+                    "synced_resources": sync_result.get("total_resources", 0),
                     "failed_resources": 0,
-                    "progress": 0.0,
-                    "status": SyncStatus.FAILED,
-                    "current_step": "Failed",
-                    "error": sync_result.get("error", "Unknown error"),
-                    "message": sync_result.get("message", "Sync failed")
+                    "progress": 100.0 if sync_result.get("total_resources", 0) > 0 else 0.0,
+                    "status": SyncStatus.COMPLETED if sync_result.get("total_resources", 0) > 0 else SyncStatus.FAILED,
+                    "current_step": "Completed with errors" if sync_errors else "Failed",
+                    "error": error_detail,
+                    "resource_summary": sync_result.get("resource_summary"),
+                    "synced_at": datetime.utcnow().isoformat()
                 }
                 
                 await session_manager.update_session(
                     session_id,
                     {"resource_sync": failed_sync_state}
                 )
+                await event_bus.publish("sync.failed", {"session_key": session_id, "error": error_detail})
                 
         except Exception as e:
             logger.error(f"Background Azure sync failed: {str(e)}")
@@ -263,6 +293,7 @@ class OnboardingService:
                 session_id,
                 {"resource_sync": failed_sync_state}
             )
+            await event_bus.publish("sync.failed", {"session_key": session_id, "error": str(e)})
     
     async def complete_step(self, step: int, user_id: str) -> bool:
         """Mark a step as completed"""

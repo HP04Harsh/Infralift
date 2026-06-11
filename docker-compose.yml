@@ -1,4 +1,20 @@
 services:
+  mongodb:
+    image: mongo:7
+    container_name: infralift-mongodb
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - infralift-network
+    restart: unless-stopped
+
   redis:
     image: redis:7-alpine
     container_name: infralift-redis
@@ -17,11 +33,15 @@ services:
     restart: unless-stopped
 
   backend:
-    image: myadmin12/infralift-backend:1.2.0
+    image: myadmin12/infralift-backend:1.10.0
     container_name: infralift-backend
     ports:
       - "8001:8000"
     environment:
+      # MongoDB
+      - MONGO_URI=mongodb://mongodb:27017
+      - MONGO_DB_NAME=infralift
+
       # Redis
       - REDIS_HOST=redis
       - REDIS_PORT=6379
@@ -55,8 +75,15 @@ services:
       - STORAGE_CONNECTION_STRING=
       - STORAGE_CONTAINER_NAME=terraform-artifacts
 
-      # --- AI Provider ---
+      # --- AI Provider (azure-openai | huggingface) ---
       - AI_PROVIDER=azure-openai
+
+      # --- HuggingFace (Required when AI_PROVIDER=huggingface) ---
+      - HF_API_KEY=
+
+      # --- Billing Currency Override (e.g. INR, EUR, GBP) ---
+      # Set to override automatic currency detection from Azure APIs
+      - DEFAULT_BILLING_CURRENCY=
     depends_on:
       redis:
         condition: service_healthy
@@ -67,7 +94,7 @@ services:
       - terraform_state:/app/terraform/state
 
   frontend:
-    image: myadmin12/infralift-frontend:1.2.0
+    image: myadmin12/infralift-frontend:1.10.0
     container_name: infralift-frontend
     ports:
       - "3001:3000"
@@ -86,4 +113,5 @@ networks:
 
 volumes:
   redis_data:
+  mongo_data:
   terraform_state:

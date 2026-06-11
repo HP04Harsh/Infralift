@@ -4,36 +4,44 @@ import { useState, useEffect } from "react";
 import { User, Bell, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUptimeStore } from "@/store/uptimeStore";
-import { useNotificationStore } from "@/store/notificationStore";
 import { useSettingsStore } from "@/store/settingsStore";
-import { NotificationDrawer } from "./NotificationDrawer";
 import { ProfileDropdown } from "./ProfileDropdown";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { PortalStatusDrawer } from "./PortalStatusDrawer";
 import { SetupGuideDrawer } from "./SetupGuideDrawer";
 import { useTenantDataStore } from "@/store/tenantDataStore";
+import { useRouter } from "next/navigation";
 
 interface HeaderProps {
   userName?: string;
   showLiveIndicator?: boolean;
 }
 
-export function Header({ userName = "Harsh Pardhi", showLiveIndicator = true }: HeaderProps) {
+export function Header({ userName: propUserName = "User", showLiveIndicator = true }: HeaderProps) {
+  const router = useRouter();
   const [uptime, setUptime] = useState("00h 00m");
-  const [showNotifications, setShowNotifications] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showPortalStatus, setShowPortalStatus] = useState(false);
   const [showSetupGuide, setShowSetupGuide] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const { getUptime, isHealthy } = useUptimeStore();
-  const { getUnreadCount } = useNotificationStore();
   const { general, customization } = useSettingsStore();
-  const unreadCount = getUnreadCount();
   const resync = useTenantDataStore((s) => s.resync);
   const lastSync = useTenantDataStore((s) => s.lastSync);
-  
-  // Get user role from localStorage
-  const userRole = typeof window !== 'undefined' ? localStorage.getItem('user_role') : null;
+  const [userName, setUserName] = useState(propUserName);
+  const [userRole, setUserRole] = useState<string | null>(null);
+
+  useEffect(() => {
+    const update = () => {
+      const name = localStorage.getItem('user_name');
+      const role = localStorage.getItem('user_role');
+      if (name) setUserName(name);
+      if (role) setUserRole(role);
+    };
+    update();
+    window.addEventListener('storage', update);
+    return () => window.removeEventListener('storage', update);
+  }, []);
 
   useEffect(() => {
     setUptime(getUptime());
@@ -127,13 +135,11 @@ export function Header({ userName = "Harsh Pardhi", showLiveIndicator = true }: 
       <div className="flex items-center gap-2">
         <ThemeToggle />
         <button 
-          onClick={() => setShowNotifications(true)}
+          onClick={() => router.push('/notifications')}
           className="relative p-2 text-gray-600 dark:text-slate-300 hover:text-gray-900 dark:hover:text-white transition-colors"
+          title="Notifications"
         >
           <Bell className="h-4 w-4" />
-          {unreadCount > 0 && (
-            <span className="absolute top-1 right-1 w-2 h-2 bg-azure-500 rounded-full animate-pulse" />
-          )}
         </button>
         <button 
           onClick={() => setShowProfile(true)}
@@ -146,9 +152,6 @@ export function Header({ userName = "Harsh Pardhi", showLiveIndicator = true }: 
         </button>
       </div>
 
-      {/* Notification Drawer */}
-      <NotificationDrawer isOpen={showNotifications} onClose={() => setShowNotifications(false)} />
-      
       {/* Portal Status Drawer */}
       <PortalStatusDrawer isOpen={showPortalStatus} onClose={() => setShowPortalStatus(false)} />
 

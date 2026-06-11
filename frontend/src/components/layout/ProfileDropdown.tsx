@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { User, Settings, LogOut } from "lucide-react";
+import { User, Settings, LogOut, Mail } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
@@ -13,11 +13,42 @@ interface ProfileDropdownProps {
   onClose: () => void;
 }
 
-export function ProfileDropdown({ userName, isOpen, onClose }: ProfileDropdownProps) {
+function recordLogoutActivity() {
+  const browser = navigator.userAgent.includes("Chrome")
+    ? "Chrome"
+    : navigator.userAgent.includes("Firefox")
+    ? "Firefox"
+    : navigator.userAgent.includes("Safari")
+    ? "Safari"
+    : "Unknown";
+  const record = {
+    type: "logout",
+    time: new Date().toLocaleString(),
+    username: localStorage.getItem("user_name") || "Unknown",
+    browser,
+    platform: "",
+    location: "",
+    ip: "",
+  };
+  const existing = JSON.parse(localStorage.getItem("login_activities") || "[]");
+  existing.unshift(record);
+  if (existing.length > 10) existing.length = 10;
+  localStorage.setItem("login_activities", JSON.stringify(existing));
+}
+
+export function ProfileDropdown({ userName: propUserName, isOpen, onClose }: ProfileDropdownProps) {
+  const [userName, setUserName] = useState(propUserName);
+  const [userEmail, setUserEmail] = useState("");
+
+  useEffect(() => {
+    const name = localStorage.getItem("user_name");
+    const email = localStorage.getItem("user_email");
+    if (name) setUserName(name);
+    setUserEmail(email || "");
+  }, []);
   const router = useRouter();
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
@@ -35,15 +66,15 @@ export function ProfileDropdown({ userName, isOpen, onClose }: ProfileDropdownPr
   }, [isOpen, onClose]);
 
   const handleSignOut = () => {
-    // Clear auth session and redirect to landing page
-    localStorage.removeItem('auth_token');
-    localStorage.removeItem('user_session');
-    router.push('/landing');
+    recordLogoutActivity();
+    localStorage.removeItem("auth_token");
+    localStorage.removeItem("user_session");
+    router.push("/landing");
     onClose();
   };
 
   const handleSettings = () => {
-    router.push('/settings');
+    router.push("/settings");
     onClose();
   };
 
@@ -51,7 +82,6 @@ export function ProfileDropdown({ userName, isOpen, onClose }: ProfileDropdownPr
     <AnimatePresence>
       {isOpen && (
         <>
-          {/* Backdrop */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -60,7 +90,6 @@ export function ProfileDropdown({ userName, isOpen, onClose }: ProfileDropdownPr
             className="fixed inset-0 bg-black/20 backdrop-blur-sm z-40"
           />
 
-          {/* Dropdown */}
           <motion.div
             ref={dropdownRef}
             initial={{ opacity: 0, y: -10, scale: 0.95 }}
@@ -69,7 +98,6 @@ export function ProfileDropdown({ userName, isOpen, onClose }: ProfileDropdownPr
             transition={{ duration: 0.2, type: "spring", damping: 25, stiffness: 200 }}
             className="fixed right-4 top-14 w-64 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl rounded-xl shadow-2xl border border-gray-200/50 dark:border-slate-700/50 z-50 overflow-hidden"
           >
-            {/* User Info Header */}
             <div className="p-4 border-b border-gray-200/50 dark:border-slate-700/50 bg-gradient-to-r from-azure-50/50 to-purple-50/50 dark:from-azure-900/20 dark:to-purple-900/20">
               <div className="flex items-center gap-3">
                 <div className="w-12 h-12 bg-gradient-to-br from-azure-500 to-purple-500 rounded-full flex items-center justify-center flex-shrink-0 shadow-lg">
@@ -80,13 +108,12 @@ export function ProfileDropdown({ userName, isOpen, onClose }: ProfileDropdownPr
                     {userName}
                   </p>
                   <p className="text-xs text-gray-600 dark:text-slate-400 truncate">
-                    Administrator
+                    {userEmail || "Administrator"}
                   </p>
                 </div>
               </div>
             </div>
 
-            {/* Menu Items */}
             <div className="p-2 space-y-1">
               <button
                 onClick={handleSettings}

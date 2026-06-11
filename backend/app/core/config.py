@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     # API Settings
     API_V1_PREFIX: str = "/api/v1"
     PROJECT_NAME: str = "Infralift"
-    VERSION: str = "1.1.0"
+    VERSION: str = "1.8.0"
     DEBUG: bool = False
     
     # Redis Settings
@@ -38,7 +38,12 @@ class Settings(BaseSettings):
     STORAGE_CONTAINER_NAME: str = "terraform-artifacts"
     
     # AI Provider Settings
-    AI_PROVIDER: str = "azure-openai"  # azure-openai, openai, claude, gemini, local
+    AI_PROVIDER: str = "azure-openai"  # azure-openai, openai, claude, gemini, local, huggingface
+    
+    # Hugging Face Settings
+    HF_API_KEY: Optional[str] = None
+    HF_MODEL: str = "google/gemma-3-12b-it"
+    HF_ENDPOINT: Optional[str] = None
     
     # OpenAI Settings (if using direct OpenAI)
     OPENAI_API_KEY: Optional[str] = None
@@ -60,8 +65,22 @@ class Settings(BaseSettings):
     TERRAFORM_VERSION: str = "1.5.0"
     TERRAFORM_STATE_BACKEND: str = "azurerm"
     
+    # MongoDB Settings
+    MONGO_URI: str = "mongodb://localhost:27017"
+    MONGO_DB_NAME: str = "infralift"
+
+    # ServiceNow Settings
+    SERVICENOW_INSTANCE_URL: Optional[str] = None
+    SERVICENOW_USERNAME: Optional[str] = None
+    SERVICENOW_PASSWORD: Optional[str] = None
+    SERVICENOW_API_TOKEN: Optional[str] = None
+    SERVICENOW_ASSIGNMENT_GROUP: Optional[str] = None
+
     # WebSocket Settings
     WS_HEARTBEAT_INTERVAL: int = 30
+
+    # Default billing currency (overrides automatic detection when set)
+    DEFAULT_BILLING_CURRENCY: Optional[str] = None
     
     class Config:
         env_file = ".env"
