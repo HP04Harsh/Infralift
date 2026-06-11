@@ -9,7 +9,6 @@ import { useCreditsStore } from "@/store/creditsStore";
 import { useOnboardingStore } from "@/store/onboardingStore";
 import { useSettingsStore } from "@/store/settingsStore";
 
-const TIMEOUT_MS = 60000;
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 2000;
 
@@ -68,17 +67,6 @@ export function InfraMini() {
     });
   }, [hasGreeted, userName, agentName, general.portalName, addMessage]);
 
-  const fetchWithTimeout = async (url: string, options: RequestInit, timeoutMs: number): Promise<Response> => {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const response = await fetch(url, { ...options, signal: controller.signal });
-      return response;
-    } finally {
-      clearTimeout(timeoutId);
-    }
-  };
-
   const handleSend = async () => {
     if (!input.trim() || loading || remaining <= 0) return;
     const userMsg = input.trim();
@@ -96,16 +84,7 @@ export function InfraMini() {
     let lastError = "";
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
       try {
-        const res = await fetchWithTimeout(
-          `${window.location.origin}/api/v1/ai/orchestrator/chat`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ message: userMsg, user_id: userName, conversation_context: tenantContext }),
-          },
-          TIMEOUT_MS
-        );
-        const data = await res.json();
+        const data: any = await apiService.inframiniChat(userMsg, userName, tenantContext);
         if (data?.success && data?.response) {
           addMessage("assistant", stripMarkdown(data.response));
           if (data.credits_used > 0) {

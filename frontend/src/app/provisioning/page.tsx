@@ -6,6 +6,7 @@ import { Sidebar } from "@/components/sidebar/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { AnimatedGradientChatInput } from "@/components/assistant/AnimatedGradientChatInput";
 import {
   Cloud, Server, Database, Container, Globe, Network,
   History, Plus, ArrowRight, Clock, CheckCircle, XCircle,
@@ -15,6 +16,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
 import { apiService } from "@/services/api";
+import { useDeploymentStore } from "@/store/deploymentStore";
 
 interface ActiveResource {
   deployment_id: string;
@@ -32,13 +34,17 @@ export default function ProvisioningAgentPage() {
   const [activeResources, setActiveResources] = useState<ActiveResource[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [inputValue, setInputValue] = useState("");
+  const deployments = useDeploymentStore((s) => s.deployments);
+  const setDeployments = useDeploymentStore((s) => s.setDeployments);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [statsRes, resourcesRes] = await Promise.all([
+        const [statsRes, resourcesRes, deployRes] = await Promise.all([
           apiService.getProvisioningStats(),
           apiService.listProvisioningResources(10),
+          apiService.getProvisioningDeployments(),
         ]);
         setStats({
           completed: (statsRes as any)?.completed ?? 0,
@@ -47,6 +53,19 @@ export default function ProvisioningAgentPage() {
         });
         const list = (resourcesRes as any) || [];
         setActiveResources(Array.isArray(list) ? list : []);
+        const depList = (deployRes as any) || [];
+        if (Array.isArray(depList) && depList.length > 0) {
+          const mapped = depList.map((r: any) => ({
+            id: r.deployment_id || `dep-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+            name: r.resource_name || r.resourceName || "",
+            type: r.resource_type || r.resourceType || "",
+            status: r.status === "Succeeded" ? "completed" as const : r.status === "Failed" ? "failed" as const : "in-progress" as const,
+            dateTime: r.created_at ? new Date(r.created_at).toLocaleString() : new Date().toLocaleString(),
+            initiatedBy: "System",
+            agentType: "provisioning",
+          }));
+          setDeployments(mapped);
+        }
       } catch (err: any) {
         setError(err?.message || "Failed to load provisioning data");
         setActiveResources([]);
@@ -56,7 +75,16 @@ export default function ProvisioningAgentPage() {
     fetchData();
     const interval = setInterval(fetchData, 15000);
     return () => clearInterval(interval);
-  }, []);
+  }, [setDeployments]);
+
+  const recentDeployments = useMemo(() => deployments.slice(0, 5), [deployments]);
+  const completedFromStore = useMemo(() => deployments.filter(d => d.status === "completed").length, [deployments]);
+  const inProgressFromStore = useMemo(() => deployments.filter(d => d.status === "in-progress").length, [deployments]);
+  const failedFromStore = useMemo(() => deployments.filter(d => d.status === "failed").length, [deployments]);
+
+  const displayCompleted = stats.completed || completedFromStore;
+  const displayInProgress = stats.in_progress || inProgressFromStore;
+  const displayFailed = stats.failed || failedFromStore;
 
   const getTypeIcon = (type: string) => {
     const t = (type || "").toLowerCase();
@@ -67,6 +95,51 @@ export default function ProvisioningAgentPage() {
     if (t.includes("network") || t.includes("vnet")) return <Network className="h-3.5 w-3.5" />;
     return <Layers className="h-3.5 w-3.5" />;
   };
+
+  const quickActions = [
+    {
+      label: "Deploy Resource Group",
+      prompt: "I want to create a Resource Group for production workloads with proper tagging.",
+      icon: <Layers className="h-4 w-4 text-blue-500" />,
+      iconBg: "bg-blue-50 dark:bg-blue-900/30",
+    },
+    {
+      label: "Deploy Virtual Machine",
+      prompt: "I want to deploy a Virtual Machine with Ubuntu 24.04, Standard D2s v3, and monitoring enabled.",
+      icon: <Server className="h-4 w-4 text-purple-500" />,
+      iconBg: "bg-purple-50 dark:bg-purple-900/30",
+    },
+    {
+      label: "Deploy Storage Account",
+      prompt: "I want to create a Storage Account with Standard GRS redundancy and StorageV2 kind.",
+      icon: <Database className="h-4 w-4 text-green-500" />,
+      iconBg: "bg-green-50 dark:bg-green-900/30",
+    },
+    {
+      label: "Deploy AKS Cluster",
+      prompt: "I want to deploy an AKS cluster with 3 nodes and Standard D2s v3 VM size.",
+      icon: <Container className="h-4 w-4 text-indigo-500" />,
+      iconBg: "bg-indigo-50 dark:bg-indigo-900/30",
+    },
+    {
+      label: "Configure Networking",
+      prompt: "I want to configure networking with a virtual network (10.0.0.0/16), subnets, and NSG.",
+      icon: <Network className="h-4 w-4 text-amber-500" />,
+      iconBg: "bg-amber-50 dark:bg-amber-900/30",
+    },
+    {
+      label: "Deploy App Service",
+      prompt: "I want to deploy an App Service with Node.js 20 runtime and Standard S1 plan.",
+      icon: <Cloud className="h-4 w-4 text-cyan-500" />,
+      iconBg: "bg-cyan-50 dark:bg-cyan-900/30",
+    },
+  ];
+
+  const placeholderVariants = [
+    "Deploy a production-ready AKS cluster with monitoring enabled...",
+    "Create a secure virtual machine in Central India...",
+    "Configure a scalable App Service environment...",
+  ];
 
   const deploymentTemplates = [
     {
@@ -113,17 +186,6 @@ export default function ProvisioningAgentPage() {
     },
   ];
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-50 dark:bg-slate-950 flex">
-        <Sidebar />
-        <div className="flex-1 lg:ml-[240px] flex items-center justify-center">
-          <Loader2 className="h-6 w-6 text-azure-500 animate-spin" />
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-slate-950 flex">
       <Sidebar />
@@ -141,8 +203,8 @@ export default function ProvisioningAgentPage() {
                     Cloud Infrastructure Engineer
                   </h1>
                   <p className="text-sm text-gray-500 dark:text-slate-400">
-                    Deploy and manage Azure infrastructure with Azure SDK &amp; Terraform.
-                    <span className="ml-2 text-xs text-gray-400">Just describe what you need.</span>
+                    AI Infrastructure Engineer. Deploy and manage Azure infrastructure with Azure SDK &amp; Terraform.
+                    <span className="ml-2 text-xs text-gray-400">No Azure knowledge required — just describe what you need.</span>
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -158,42 +220,17 @@ export default function ProvisioningAgentPage() {
               </div>
             </div>
 
-            {/* Status Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-              <Card className="border-emerald-200/50 dark:border-emerald-800/30 bg-gradient-to-br from-emerald-50 to-white dark:from-emerald-950/20 dark:to-slate-800/50">
-                <CardContent className="p-4 flex items-center gap-4">
-                  <div className="h-12 w-12 rounded-xl bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
-                    <CheckCircle className="h-6 w-6 text-emerald-600 dark:text-emerald-400" />
-                  </div>
-                  <div>
-                    <p className="text-2xl font-bold text-gray-900 dark:text-white">{stats.completed}</p>
-                    <p className="text-xs text-gray-500 dark:text-slate-400">Completed</p>
-                  </div>
-                </CardContent>
-              </Card>
-              <Card className="border-azure-200/50 dark:border-azure-800/30 bg-gradient-to-br from-azure-50 to-white dark:from-azure-950/20 dark:to-slate-800/50">
-                <CardContent className="p-4 flex items-center gap-4">
-                  <div className="h-12 w-12 rounded-xl bg-azure-100 dark:bg-azure-900/30 flex items-center justify-center">
-                    <Activity className="h-6 w-6 text-azure-600 dark:text-azure-400" />
-                  </div>
-                  <div>
-                    <p className="text-2xl font-bold text-gray-900 dark:text-white">{stats.in_progress}</p>
-                    <p className="text-xs text-gray-500 dark:text-slate-400">In Progress</p>
-                  </div>
-                </CardContent>
-              </Card>
-              <Card className="border-red-200/50 dark:border-red-800/30 bg-gradient-to-br from-red-50 to-white dark:from-red-950/20 dark:to-slate-800/50">
-                <CardContent className="p-4 flex items-center gap-4">
-                  <div className="h-12 w-12 rounded-xl bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
-                    <XCircle className="h-6 w-6 text-red-600 dark:text-red-400" />
-                  </div>
-                  <div>
-                    <p className="text-2xl font-bold text-gray-900 dark:text-white">{stats.failed}</p>
-                    <p className="text-xs text-gray-500 dark:text-slate-400">Failed</p>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
+            {/* AI Assistant — exactly as original */}
+            <AnimatedGradientChatInput
+              title="Provisioning Assist"
+              icon={<Activity className="h-5 w-5 text-azure-500" />}
+              quickActions={quickActions}
+              placeholderVariants={placeholderVariants}
+              agentType="provisioning"
+              className="mb-6"
+              value={inputValue}
+              onValueChange={setInputValue}
+            />
 
             {error && (
               <div className="mb-6 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg text-sm text-amber-700 dark:text-amber-400">
@@ -201,9 +238,8 @@ export default function ProvisioningAgentPage() {
               </div>
             )}
 
-            {/* Main Content */}
             <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-              {/* Templates Grid */}
+              {/* Templates Grid — left side */}
               <div className="lg:col-span-3">
                 <Card className="border-gray-200/50 dark:border-slate-700/50 bg-white dark:bg-slate-800/50 shadow-sm">
                   <CardHeader className="pb-4">
@@ -242,8 +278,33 @@ export default function ProvisioningAgentPage() {
                 </Card>
               </div>
 
-              {/* Right Sidebar */}
+              {/* Right Sidebar — exactly as original */}
               <div className="space-y-4">
+                {/* Deployment Status */}
+                <Card className="border-gray-200/50 dark:border-slate-700/50 bg-white dark:bg-slate-800/50 shadow-sm">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm font-semibold text-gray-900 dark:text-white">
+                      Deployment Status
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-gray-500 dark:text-slate-400">Completed</span>
+                        <span className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">{displayCompleted}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-gray-500 dark:text-slate-400">In Progress</span>
+                        <span className="text-sm font-semibold text-azure-600 dark:text-azure-400">{displayInProgress}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-gray-500 dark:text-slate-400">Failed</span>
+                        <span className="text-sm font-semibold text-red-600 dark:text-red-400">{displayFailed}</span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
                 {/* Active Resources */}
                 <Card className="border-gray-200/50 dark:border-slate-700/50 bg-white dark:bg-slate-800/50 shadow-sm">
                   <CardHeader className="pb-3">
@@ -253,8 +314,12 @@ export default function ProvisioningAgentPage() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    {activeResources.length > 0 ? (
-                      <div className="space-y-2 max-h-[360px] overflow-y-auto">
+                    {loading ? (
+                      <div className="flex items-center justify-center py-4">
+                        <Activity className="h-4 w-4 text-gray-400 animate-spin" />
+                      </div>
+                    ) : activeResources.length > 0 ? (
+                      <div className="space-y-2 max-h-[240px] overflow-y-auto">
                         {activeResources.map((r, i) => (
                           <div key={r.deployment_id || i} className="flex items-start gap-2 p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors">
                             <div className="flex-shrink-0 mt-0.5 text-gray-500 dark:text-slate-400">
@@ -289,43 +354,39 @@ export default function ProvisioningAgentPage() {
                   </CardContent>
                 </Card>
 
-                {/* Quick Deploy */}
+                {/* Recent Deployments */}
                 <Card className="border-gray-200/50 dark:border-slate-700/50 bg-white dark:bg-slate-800/50 shadow-sm">
                   <CardHeader className="pb-3">
-                    <CardTitle className="text-sm font-semibold text-gray-900 dark:text-white">
-                      Quick Deploy
+                    <CardTitle className="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                      <Clock className="h-4 w-4" />
+                      Recent Deployments
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="space-y-2">
-                      <Button
-                        size="sm"
-                        className="w-full justify-start text-xs h-9"
-                        variant="outline"
-                        onClick={() => router.push('/provisioning/chat?prompt=' + encodeURIComponent("Create a Resource Group in Central India for production workloads"))}
-                      >
-                        <Layers className="h-3.5 w-3.5 mr-2" />
-                        New Resource Group
-                      </Button>
-                      <Button
-                        size="sm"
-                        className="w-full justify-start text-xs h-9"
-                        variant="outline"
-                        onClick={() => router.push('/provisioning/chat?prompt=' + encodeURIComponent("Create a Virtual Machine in Central India with Ubuntu 24.04, Standard D2s v3"))}
-                      >
-                        <Server className="h-3.5 w-3.5 mr-2" />
-                        New Virtual Machine
-                      </Button>
-                      <Button
-                        size="sm"
-                        className="w-full justify-start text-xs h-9"
-                        variant="outline"
-                        onClick={() => router.push('/provisioning/chat?prompt=' + encodeURIComponent("Create a Storage Account in Central India with Standard GRS"))}
-                      >
-                        <Database className="h-3.5 w-3.5 mr-2" />
-                        New Storage Account
-                      </Button>
-                    </div>
+                    {recentDeployments.length > 0 ? (
+                      <div className="space-y-2 max-h-[200px] overflow-y-auto">
+                        {recentDeployments.map((dep) => (
+                          <div key={dep.id} className="flex items-start gap-3 p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors">
+                            <div className="flex-shrink-0 mt-0.5">
+                              {dep.status === "completed" ? (
+                                <CheckCircle className="h-4 w-4 text-emerald-500" />
+                              ) : dep.status === "failed" ? (
+                                <XCircle className="h-4 w-4 text-red-500" />
+                              ) : (
+                                <Activity className="h-4 w-4 text-azure-500 animate-pulse" />
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-medium text-gray-900 dark:text-white truncate">{dep.name}</p>
+                              <p className="text-xs text-gray-500 dark:text-slate-400">{dep.type}</p>
+                            </div>
+                            <span className="text-xs text-gray-400 dark:text-slate-500 flex-shrink-0">{dep.dateTime}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-gray-400 dark:text-slate-500 text-center py-4">No recent deployments</p>
+                    )}
                   </CardContent>
                 </Card>
               </div>
