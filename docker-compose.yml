@@ -33,7 +33,7 @@ services:
     restart: unless-stopped
 
   backend:
-    image: myadmin12/infralift-backend:1.10.0
+    image: myadmin12/infralift-backend:1.11.0
     container_name: infralift-backend
     ports:
       - "8001:8000"
@@ -94,7 +94,7 @@ services:
       - terraform_state:/app/terraform/state
 
   frontend:
-    image: myadmin12/infralift-frontend:1.10.0
+    image: myadmin12/infralift-frontend:1.11.0
     container_name: infralift-frontend
     ports:
       - "3001:3000"
